@@ -1,0 +1,6 @@
+{
+  "name": "Cek Data Pemegang Sertifikat Kompetensi",
+  "description": "Layanan informasi dan cek data pemegang sertifikat kompetensi sebelum dan setelah 01 November 2022.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
