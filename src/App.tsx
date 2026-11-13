@@ -1284,8 +1284,8 @@ export function HalamanVerifikasi({
 
   const performLookup = useCallback(
     async (rawNik: string) => {
-      const cleanNik = rawNik.trim();
-      if (!cleanNik) {
+      const inputNik = rawNik.trim();
+      if (!inputNik) {
         setErrorMsg('Silakan ketik NIK terlebih dahulu sebelum menekan CARI.');
         setHasilData(null);
         setHasSearched(false);
@@ -1303,33 +1303,65 @@ export function HalamanVerifikasi({
         const { data, error } = await supabase
           .from('data_pemegang')
           .select('*')
-          .eq('nik', cleanNik)
-          .order('id', { ascending: false });
+          .eq('nik', inputNik)
+          .single();
 
         if (error) {
+          // PGRST116 occurs when .single() returns 0 rows (data kosong) or >1 rows
+          if (error.code === 'PGRST116') {
+            const details = `${error.details ?? ''} ${error.message ?? ''}`.toLowerCase();
+            const isMultipleRows =
+              !details.includes('0 rows') &&
+              (/contains\s+[2-9]\d*\s+rows|contains\s+\d{2,}\s+rows|multiple/i.test(details));
+
+            if (!isMultipleRows) {
+              // Data tidak ditemukan / kosong
+              setHasilData(null);
+              return;
+            }
+
+            // Jika ada lebih dari 1 sertifikat untuk NIK yang sama, ambil yang paling relevan
+            const { data: multiRows, error: multiErr } = await supabase
+              .from('data_pemegang')
+              .select('*')
+              .eq('nik', inputNik)
+              .order('id', { ascending: false });
+
+            if (multiErr) {
+              throw new Error(multiErr.message);
+            }
+
+            const rows = (multiRows as PemegangSertifikatRow[] | null) ?? [];
+            if (rows.length === 0) {
+              setHasilData(null);
+              return;
+            }
+
+            const schemeTitle = jenisData?.split('::')[1]?.toLowerCase() ?? '';
+            const matchedRow =
+              (jenisData ? rows.find((r) => r.jenis_data === jenisData) : undefined) ||
+              (schemeTitle
+                ? rows.find(
+                    (r) =>
+                      r.jenis_data?.toLowerCase().includes(schemeTitle) ||
+                      r.program_lpk?.toLowerCase().includes(schemeTitle)
+                  )
+                : undefined) ||
+              rows[0];
+
+            setHasilData(matchedRow);
+            return;
+          }
+
           throw new Error(error.message);
         }
 
-        const rows = (data as PemegangSertifikatRow[] | null) ?? [];
-        if (rows.length === 0) {
+        if (!data) {
           setHasilData(null);
           return;
         }
 
-        // Prioritize exact jenis_data match, then title/program match, then latest NIK record
-        const schemeTitle = jenisData?.split('::')[1]?.toLowerCase() ?? '';
-        const matchedRow =
-          (jenisData ? rows.find((r) => r.jenis_data === jenisData) : undefined) ||
-          (schemeTitle
-            ? rows.find(
-                (r) =>
-                  r.jenis_data?.toLowerCase().includes(schemeTitle) ||
-                  r.program_lpk?.toLowerCase().includes(schemeTitle)
-              )
-            : undefined) ||
-          rows[0];
-
-        setHasilData(matchedRow);
+        setHasilData(data as PemegangSertifikatRow);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Gagal terhubung ke database Supabase.';
         setErrorMsg(`Terjadi kesalahan saat mencari data: ${message}`);
@@ -1475,19 +1507,62 @@ export function HalamanVerifikasi({
           </form>
 
           {errorMsg && (
-            <div className="mt-4 rounded-[12px] bg-[#FEF2F2] border border-[#FECACA] px-3.5 py-3 text-[12.5px] text-[#991B1B] font-medium">
-              {errorMsg}
+            <div
+              role="alert"
+              className="mt-4 rounded-[14px] bg-[#FEF2F2] border-[1.5px] border-[#FCA5A5] border-l-[4px] border-l-[#DC2626] px-4 py-3.5 flex items-start gap-3 shadow-xs"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="w-[20px] h-[20px] shrink-0 text-[#DC2626] mt-0.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <div className="text-left">
+                <div className="text-[11.5px] font-extrabold text-[#991B1B] uppercase tracking-[0.04em]">
+                  PERINGATAN
+                </div>
+                <p className="mt-0.5 text-[12.5px] text-[#7F1D1D] font-medium leading-relaxed">
+                  {errorMsg}
+                </p>
+              </div>
             </div>
           )}
 
           {hasSearched && !loading && !errorMsg && !hasilData && (
-            <div className="mt-5 rounded-[14px] bg-[#FFFBEB] border border-[#FDE68A] px-4 py-4 text-center">
-              <div className="text-[12.5px] font-extrabold text-[#92400E] uppercase tracking-[0.03em]">
-                DATA TIDAK DITEMUKAN
+            <div
+              role="alert"
+              className="mt-5 rounded-[14px] bg-[#FEF2F2] border-[1.5px] border-[#FCA5A5] border-l-[4px] border-l-[#B91C1C] px-4 py-4 flex items-start gap-3 shadow-[0_4px_12px_rgba(185,28,28,0.08)]"
+            >
+              <div className="w-8 h-8 rounded-full bg-[#FEE2E2] border border-[#FECACA] flex items-center justify-center shrink-0 mt-0.5">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="w-[18px] h-[18px] text-[#DC2626]"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
               </div>
-              <p className="mt-1 text-[12.5px] text-[#78350F] leading-relaxed">
-                Data pemegang sertifikat dengan NIK <strong className="font-bold">{nik.trim()}</strong> belum terdaftar di sistem database.
-              </p>
+              <div className="text-left min-w-0 flex-1">
+                <div className="text-[12px] font-extrabold text-[#991B1B] uppercase tracking-[0.04em]">
+                  DATA TIDAK DITEMUKAN
+                </div>
+                <p className="mt-1 text-[13px] text-[#7F1D1D] font-semibold leading-relaxed">
+                  Data tidak ditemukan. Pastikan NIK yang Anda masukkan benar.
+                </p>
+              </div>
             </div>
           )}
 
