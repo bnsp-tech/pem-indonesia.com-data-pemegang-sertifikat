@@ -3,16 +3,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 
 interface HalamanSetelahNov2022Props {
   onBack?: () => void;
   onHome?: () => void;
   onVerifikasi?: (judul: string) => void;
+  onAdminLoginSuccess?: () => void;
 }
 
-export function HalamanSetelahNov2022({ onBack, onHome, onVerifikasi }: HalamanSetelahNov2022Props) {
+export function HalamanSetelahNov2022({
+  onBack,
+  onHome,
+  onVerifikasi,
+  onAdminLoginSuccess,
+}: HalamanSetelahNov2022Props) {
   const [openBlock, setOpenBlock] = useState<string | null>(null);
+  const [showLoginAdmin, setShowLoginAdmin] = useState(false);
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef<number | null>(null);
+
+  const handleSecretFooterTap = () => {
+    if (tapTimerRef.current !== null) {
+      window.clearTimeout(tapTimerRef.current);
+    }
+    tapCountRef.current += 1;
+    if (tapCountRef.current >= 5) {
+      tapCountRef.current = 0;
+      setShowLoginAdmin(true);
+      return;
+    }
+    tapTimerRef.current = window.setTimeout(() => {
+      tapCountRef.current = 0;
+    }, 1800);
+  };
 
   const institutions = [
     {
@@ -555,8 +579,11 @@ export function HalamanSetelahNov2022({ onBack, onHome, onVerifikasi }: HalamanS
           </div>
         </main>
 
-        {/* Footer */}
-        <footer className="px-6 pt-1 pb-7 text-center">
+        {/* Footer (Secret Tap 5x Gate) */}
+        <footer
+          onClick={handleSecretFooterTap}
+          className="px-6 pt-1 pb-7 text-center select-none cursor-default"
+        >
           <p className="text-[11.5px] text-[#6B7280] leading-[1.5]">
             © 2026{' '}
             <span className="font-bold text-[#7D0609]">
@@ -565,6 +592,16 @@ export function HalamanSetelahNov2022({ onBack, onHome, onVerifikasi }: HalamanS
             . All Rights Reserved.
           </p>
         </footer>
+
+        {showLoginAdmin && (
+          <LoginAdmin
+            onClose={() => setShowLoginAdmin(false)}
+            onSuccess={() => {
+              setShowLoginAdmin(false);
+              onAdminLoginSuccess?.();
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -1050,8 +1087,634 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
   );
 }
 
+interface LoginAdminProps {
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export function LoginAdmin({ onClose, onSuccess }: LoginAdminProps) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (username === 'admin' && password === 'Microsoft') {
+      setError('');
+      onSuccess();
+      return;
+    }
+    setError('Username atau password tidak valid.');
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 font-sans">
+      <div className="w-full max-w-[360px] rounded-[20px] bg-[#0F141E] border border-slate-700/90 shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-5 text-slate-100">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div>
+            <span className="inline-block text-[10px] font-bold tracking-[0.12em] uppercase text-emerald-400">
+              SUPER ADMIN ACCESS
+            </span>
+            <h2 className="text-[18px] font-extrabold text-white tracking-tight">
+              ROOT GATE LOGIN
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Tutup"
+            className="w-8 h-8 rounded-lg bg-slate-800/90 border border-slate-700 text-slate-300 hover:text-white flex items-center justify-center cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
+          <div>
+            <label
+              htmlFor="admin-username"
+              className="block text-[11px] font-bold uppercase tracking-[0.06em] text-slate-300 mb-1.5"
+            >
+              Username
+            </label>
+            <input
+              id="admin-username"
+              type="text"
+              autoComplete="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Masukkan username"
+              className="w-full rounded-[12px] bg-[#161D2B] border border-slate-700 px-3.5 py-2.5 text-[14px] text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="admin-password"
+              className="block text-[11px] font-bold uppercase tracking-[0.06em] text-slate-300 mb-1.5"
+            >
+              Password
+            </label>
+            <input
+              id="admin-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Masukkan password"
+              className="w-full rounded-[12px] bg-[#161D2B] border border-slate-700 px-3.5 py-2.5 text-[14px] text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-[10px] bg-rose-950/70 border border-rose-700/70 px-3 py-2 text-[12px] text-rose-200">
+              {error}
+            </div>
+          )}
+
+          <div className="pt-1 flex gap-2.5">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-[12px] bg-slate-800 border border-slate-700 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.04em] text-slate-300 cursor-pointer active:scale-95 transition-transform"
+            >
+              BATAL
+            </button>
+            <button
+              type="submit"
+              className="flex-1 rounded-[12px] bg-gradient-to-b from-emerald-500 to-emerald-600 border-b-[3px] border-b-emerald-800 py-2.5 text-[12.5px] font-extrabold uppercase tracking-[0.06em] text-slate-950 cursor-pointer active:translate-y-[1px] transition-all"
+            >
+              LOGIN
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+interface AdminProgramItem {
+  key: string;
+  lembaga: string;
+  title: string;
+}
+
+interface AdminPemegangRecord {
+  id: string;
+  nama: string;
+  nik: string;
+  status: string;
+  foto: string;
+}
+
+const ADMIN_PROGRAM_GROUPS: { lembaga: string; items: AdminProgramItem[] }[] = [
+  {
+    lembaga: 'PUSAT PENDIDIKAN GEOMIGAS',
+    items: [
+      { key: 'geomigas::Operator K3 Migas', lembaga: 'PUSAT PENDIDIKAN GEOMIGAS', title: 'Operator K3 Migas' },
+      { key: 'geomigas::Pengawas K3 Migas', lembaga: 'PUSAT PENDIDIKAN GEOMIGAS', title: 'Pengawas K3 Migas' },
+      { key: 'geomigas::Supervisor K3 Tambang', lembaga: 'PUSAT PENDIDIKAN GEOMIGAS', title: 'Supervisor K3 Tambang' },
+      { key: 'geomigas::Operator K3 Listrik', lembaga: 'PUSAT PENDIDIKAN GEOMIGAS', title: 'Operator K3 Listrik' },
+      { key: 'geomigas::Teknisi K3 Listrik', lembaga: 'PUSAT PENDIDIKAN GEOMIGAS', title: 'Teknisi K3 Listrik' },
+      { key: 'geomigas::Ahli K3 Listrik', lembaga: 'PUSAT PENDIDIKAN GEOMIGAS', title: 'Ahli K3 Listrik' },
+      { key: 'geomigas::Auditor SMK3 Tambang', lembaga: 'PUSAT PENDIDIKAN GEOMIGAS', title: 'Auditor SMK3 Tambang' },
+    ],
+  },
+  {
+    lembaga: 'PEM INDONESIA',
+    items: [
+      { key: 'pem-indonesia::Operator Scaffolding', lembaga: 'PEM INDONESIA', title: 'Operator Scaffolding' },
+      { key: 'pem-indonesia::Pengawas Scaffolding', lembaga: 'PEM INDONESIA', title: 'Pengawas Scaffolding' },
+      { key: 'pem-indonesia::Operator K3 Umum', lembaga: 'PEM INDONESIA', title: 'Operator K3 Umum' },
+      { key: 'pem-indonesia::Petugas K3 Umum', lembaga: 'PEM INDONESIA', title: 'Petugas K3 Umum' },
+      { key: 'pem-indonesia::Ahli K3 Umum', lembaga: 'PEM INDONESIA', title: 'Ahli K3 Umum' },
+      { key: 'pem-indonesia::K3 Ruang Terbatas (Confined Space)', lembaga: 'PEM INDONESIA', title: 'K3 Ruang Terbatas (Confined Space)' },
+      { key: 'pem-indonesia::Petugas Gas H2S', lembaga: 'PEM INDONESIA', title: 'Petugas Gas H2S' },
+      { key: 'pem-indonesia::Authorized Gas Tester', lembaga: 'PEM INDONESIA', title: 'Authorized Gas Tester' },
+      { key: 'pem-indonesia::Operator Excavator', lembaga: 'PEM INDONESIA', title: 'Operator Excavator' },
+      { key: 'pem-indonesia::Operator Backhoe', lembaga: 'PEM INDONESIA', title: 'Operator Backhoe' },
+      { key: 'pem-indonesia::Operator Loader', lembaga: 'PEM INDONESIA', title: 'Operator Loader' },
+      { key: 'pem-indonesia::Operator Dumptruck', lembaga: 'PEM INDONESIA', title: 'Operator Dumptruck' },
+      { key: 'pem-indonesia::Operator Dozer', lembaga: 'PEM INDONESIA', title: 'Operator Dozer' },
+      { key: 'pem-indonesia::Operator Motorgrader', lembaga: 'PEM INDONESIA', title: 'Operator Motorgrader' },
+      { key: 'pem-indonesia::Operator Mobile Crane', lembaga: 'PEM INDONESIA', title: 'Operator Mobile Crane' },
+      { key: 'pem-indonesia::Operator Forklift', lembaga: 'PEM INDONESIA', title: 'Operator Forklift' },
+      { key: 'pem-indonesia::Operator Overhead Crane', lembaga: 'PEM INDONESIA', title: 'Operator Overhead Crane' },
+      { key: 'pem-indonesia::Operator Pedestal Crane', lembaga: 'PEM INDONESIA', title: 'Operator Pedestal Crane' },
+      { key: 'pem-indonesia::Juru Ikat Beban / Rigger', lembaga: 'PEM INDONESIA', title: 'Juru Ikat Beban / Rigger' },
+      { key: 'pem-indonesia::Inspector Pesawat Angkat', lembaga: 'PEM INDONESIA', title: 'Inspector Pesawat Angkat' },
+      { key: 'pem-indonesia::Petugas Fire Safety', lembaga: 'PEM INDONESIA', title: 'Petugas Fire Safety' },
+      { key: 'pem-indonesia::Petugas First Aid', lembaga: 'PEM INDONESIA', title: 'Petugas First Aid' },
+    ],
+  },
+  {
+    lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)',
+    items: [
+      { key: 'lsp-k3::Petugas K3 Umum', lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)', title: 'Petugas K3 Umum' },
+      { key: 'lsp-k3::Ahli K3 Umum', lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)', title: 'Ahli K3 Umum' },
+      { key: 'lsp-k3::Teknisi K3 Ketinggian', lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)', title: 'Teknisi K3 Ketinggian' },
+      { key: 'lsp-k3::Ahli Muda Ruang Terbatas', lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)', title: 'Ahli Muda Ruang Terbatas' },
+      { key: 'lsp-k3::Ahli Madya Ruang Terbatas', lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)', title: 'Ahli Madya Ruang Terbatas' },
+      { key: 'lsp-k3::Auditor SMK3 Umum', lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)', title: 'Auditor SMK3 Umum' },
+      { key: 'lsp-k3::Operator K3 Alat Berat', lembaga: 'LEMBAGA SERTIFIKASI PROFESI K3 (LSP K3)', title: 'Operator K3 Alat Berat' },
+    ],
+  },
+];
+
+function createInitialAdminDummyData(): Record<string, AdminPemegangRecord[]> {
+  const sampleNames = [
+    ['BUDI SANTOSO', 'RENDI PRATAMA'],
+    ['ANI WIJAYA', 'DEWI LESTARI'],
+    ['HENDRA KUSUMA', 'FAJAR NUGROHO'],
+    ['AGUS SETIAWAN', 'YUSUF RAMADHAN'],
+  ];
+  const data: Record<string, AdminPemegangRecord[]> = {};
+  let index = 0;
+
+  for (const group of ADMIN_PROGRAM_GROUPS) {
+    for (const item of group.items) {
+      const lower = item.title.toLowerCase();
+      const pair = lower.includes('scaffolding')
+        ? ['BUDI SANTOSO', 'MUCHT.']
+        : lower.includes('k3')
+          ? ['ANI WIJAYA', 'SITI RAHMA']
+          : sampleNames[index % sampleNames.length];
+      const baseNum = 731103300100 + index * 17;
+      data[item.key] = [
+        {
+          id: `${item.key}-1`,
+          nama: pair[0],
+          nik: `${baseNum}`,
+          status: 'VALID AKTIF',
+          foto: '',
+        },
+        {
+          id: `${item.key}-2`,
+          nama: pair[1],
+          nik: `${baseNum + 5}`,
+          status: 'VALID AKTIF',
+          foto: '',
+        },
+      ];
+      index += 1;
+    }
+  }
+  return data;
+}
+
+interface HalamanAdminDashboardProps {
+  onKembali: () => void;
+  onLogout: () => void;
+}
+
+export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashboardProps) {
+  const [dataByProgram, setDataByProgram] = useState<Record<string, AdminPemegangRecord[]>>(
+    () => createInitialAdminDummyData()
+  );
+  const [selectedProgram, setSelectedProgram] = useState<AdminProgramItem | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formNama, setFormNama] = useState('');
+  const [formNik, setFormNik] = useState('');
+  const [formStatus, setFormStatus] = useState('VALID AKTIF');
+  const [formFoto, setFormFoto] = useState('');
+
+  const openTambahModal = () => {
+    setEditingId(null);
+    setFormNama('');
+    setFormNik('');
+    setFormStatus('VALID AKTIF');
+    setFormFoto('');
+    setFormOpen(true);
+  };
+
+  const openEditModal = (record: AdminPemegangRecord) => {
+    setEditingId(record.id);
+    setFormNama(record.nama);
+    setFormNik(record.nik);
+    setFormStatus(record.status);
+    setFormFoto(record.foto);
+    setFormOpen(true);
+  };
+
+  const handleUploadFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setFormFoto(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveRecord = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProgram) return;
+    const cleanedNama = formNama.trim().toUpperCase() || 'TANPA NAMA';
+    const cleanedNik = formNik.trim() || '000000000000';
+    const key = selectedProgram.key;
+
+    setDataByProgram((prev) => {
+      const currentList = prev[key] ?? [];
+      if (editingId) {
+        return {
+          ...prev,
+          [key]: currentList.map((row) =>
+            row.id === editingId
+              ? {
+                  ...row,
+                  nama: cleanedNama,
+                  nik: cleanedNik,
+                  status: formStatus,
+                  foto: formFoto,
+                }
+              : row
+          ),
+        };
+      }
+      const newRecord: AdminPemegangRecord = {
+        id: `${key}-${Date.now()}`,
+        nama: cleanedNama,
+        nik: cleanedNik,
+        status: formStatus,
+        foto: formFoto,
+      };
+      return {
+        ...prev,
+        [key]: [newRecord, ...currentList],
+      };
+    });
+
+    setFormOpen(false);
+  };
+
+  const handleDeleteRecord = (id: string) => {
+    if (!selectedProgram) return;
+    const key = selectedProgram.key;
+    setDataByProgram((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).filter((row) => row.id !== id),
+    }));
+  };
+
+  const activeRecords = selectedProgram ? dataByProgram[selectedProgram.key] ?? [] : [];
+
+  return (
+    <div className="min-h-screen w-full bg-[#05070B] flex justify-center font-sans antialiased text-slate-100">
+      {/* Mobile-only locked container (max-width: 430px) */}
+      <div className="w-full max-w-[430px] min-h-screen bg-[#0B0F17] border-x border-slate-800/80 flex flex-col shadow-[0_0_60px_rgba(0,0,0,0.85)] overflow-x-hidden">
+        {/* Top Dark Admin Header */}
+        <header className="sticky top-0 z-30 bg-[#111827] border-b border-slate-800 px-3.5 py-3 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-emerald-400">
+                SUPER ADMIN
+              </span>
+            </div>
+            <h1 className="text-[18px] font-black tracking-[0.06em] uppercase text-white leading-tight">
+              ROOT GATE
+            </h1>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onKembali}
+              className="rounded-[10px] bg-slate-800 border border-slate-700 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.04em] text-slate-200 cursor-pointer active:scale-95 transition-transform"
+            >
+              KEMBALI
+            </button>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="rounded-[10px] bg-rose-600/90 border border-rose-500/60 px-3 py-2 text-[11px] font-extrabold uppercase tracking-[0.04em] text-white cursor-pointer active:scale-95 transition-transform"
+            >
+              LOGOUT
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 px-3.5 py-4">
+          {!selectedProgram ? (
+            <div className="space-y-5">
+              <div className="rounded-[16px] bg-[#111827] border border-slate-800 p-4">
+                <p className="text-[12px] text-slate-400 leading-relaxed">
+                  Pilih salah satu jenis sertifikat di bawah untuk mengelola data pemegang sertifikat (Tambah, Edit, Hapus, &amp; Upload Foto).
+                </p>
+              </div>
+
+              {ADMIN_PROGRAM_GROUPS.map((group) => (
+                <section key={group.lembaga} className="space-y-2.5">
+                  <div className="flex items-center justify-between px-1">
+                    <h2 className="text-[11px] font-extrabold tracking-[0.08em] uppercase text-amber-400">
+                      {group.lembaga}
+                    </h2>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      {group.items.length} Skema
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {group.items.map((item) => {
+                      const count = (dataByProgram[item.key] ?? []).length;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => setSelectedProgram(item)}
+                          className="w-full rounded-[14px] bg-[#131A26] hover:bg-[#192233] border border-slate-800 px-3.5 py-3 flex items-center justify-between gap-3 text-left cursor-pointer active:scale-[0.99] transition-all"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[13px] font-bold text-slate-100 leading-snug">
+                              Kelola Data {item.title}
+                            </div>
+                            <div className="text-[10.5px] text-slate-400 mt-0.5">
+                              {count} data pemegang
+                            </div>
+                          </div>
+                          <span className="shrink-0 rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.05em] text-emerald-400">
+                            KELOLA
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Program Table Header Controls */}
+              <div className="rounded-[16px] bg-[#111827] border border-slate-800 p-4 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedProgram(null)}
+                  className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-amber-400 cursor-pointer"
+                >
+                  <span>←</span>
+                  <span>Semua Jenis Sertifikat</span>
+                </button>
+
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.06em] text-slate-400">
+                      {selectedProgram.lembaga}
+                    </div>
+                    <h2 className="text-[16px] font-extrabold text-white leading-snug mt-0.5">
+                      Kelola Data {selectedProgram.title}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openTambahModal}
+                    className="shrink-0 rounded-[10px] bg-emerald-500 border-b-[3px] border-b-emerald-700 px-3.5 py-2 text-[11.5px] font-extrabold uppercase tracking-[0.05em] text-slate-950 cursor-pointer active:translate-y-[1px] transition-all"
+                  >
+                    + TAMBAH
+                  </button>
+                </div>
+              </div>
+
+              {/* Dummy Data Table */}
+              <div className="rounded-[16px] border border-slate-800 bg-[#111827] overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-[380px]">
+                    <thead>
+                      <tr className="bg-[#182132] border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-[0.06em] text-slate-400">
+                        <th className="py-2.5 px-3">Foto</th>
+                        <th className="py-2.5 px-2.5">Nama / NIK</th>
+                        <th className="py-2.5 px-2.5">Status</th>
+                        <th className="py-2.5 px-3 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/80 text-[12px]">
+                      {activeRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-8 px-4 text-center text-slate-500">
+                            Belum ada data. Klik tombol TAMBAH untuk menambahkan data.
+                          </td>
+                        </tr>
+                      ) : (
+                        activeRecords.map((row) => (
+                          <tr key={row.id} className="hover:bg-slate-800/30">
+                            <td className="py-3 px-3 align-middle">
+                              {row.foto ? (
+                                <img
+                                  src={row.foto}
+                                  alt={row.nama}
+                                  className="w-10 h-12 rounded-[8px] object-cover border border-amber-500/60"
+                                />
+                              ) : (
+                                <div className="w-10 h-12 rounded-[8px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400">
+                                  FOTO
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-2.5 align-middle">
+                              <div className="font-bold text-white leading-tight">
+                                {row.nama}
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                                {row.nik}
+                              </div>
+                            </td>
+                            <td className="py-3 px-2.5 align-middle">
+                              <span
+                                className={`inline-block rounded-full px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-[0.04em] ${
+                                  row.status === 'VALID AKTIF'
+                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                }`}
+                              >
+                                {row.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 align-middle text-right">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(row)}
+                                  className="rounded-lg bg-amber-500/20 border border-amber-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-amber-300 cursor-pointer active:scale-95 transition-transform"
+                                >
+                                  EDIT
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRecord(row.id)}
+                                  className="rounded-lg bg-rose-500/20 border border-rose-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-rose-300 cursor-pointer active:scale-95 transition-transform"
+                                >
+                                  HAPUS
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+
+        {/* Modal Form TAMBAH / EDIT */}
+        {formOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+            <div className="w-full max-w-[370px] rounded-[20px] bg-[#111827] border border-slate-700 p-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 className="text-[15px] font-extrabold uppercase tracking-[0.04em] text-white">
+                  {editingId ? 'Edit Data Pemegang' : 'Tambah Data Pemegang'}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setFormOpen(false)}
+                  aria-label="Tutup form"
+                  className="w-7 h-7 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveRecord} className="mt-4 space-y-3.5">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
+                    Nama Pemegang
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formNama}
+                    onChange={(e) => setFormNama(e.target.value)}
+                    placeholder="Contoh: BUDI SANTOSO"
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
+                    NIK
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    required
+                    value={formNik}
+                    onChange={(e) => setFormNik(e.target.value)}
+                    placeholder="Contoh: 731103300172"
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
+                    Status
+                  </label>
+                  <select
+                    value={formStatus}
+                    onChange={(e) => setFormStatus(e.target.value)}
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="VALID AKTIF">VALID AKTIF</option>
+                    <option value="TIDAK AKTIF">TIDAK AKTIF</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
+                    Upload Foto
+                  </label>
+                  <div className="flex items-center gap-3">
+                    {formFoto ? (
+                      <img
+                        src={formFoto}
+                        alt="Preview"
+                        className="w-12 h-14 rounded-[8px] object-cover border border-amber-400 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-12 h-14 rounded-[8px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0">
+                        NO FOTO
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadFoto}
+                      className="w-full text-[11.5px] text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:text-white hover:file:bg-slate-600 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setFormOpen(false)}
+                    className="flex-1 rounded-[10px] bg-slate-800 border border-slate-700 py-2.5 text-[12px] font-bold uppercase text-slate-300 cursor-pointer"
+                  >
+                    BATAL
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 rounded-[10px] bg-emerald-500 border-b-[3px] border-b-emerald-700 py-2.5 text-[12px] font-extrabold uppercase text-slate-950 cursor-pointer"
+                  >
+                    SIMPAN
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export { HalamanAdminDashboard as AdminDashboard };
+
 export default function App() {
-  const [page, setPage] = useState<'beranda' | 'sebelum' | 'sesudah' | 'verifikasi'>('beranda');
+  const [page, setPage] = useState<'beranda' | 'sebelum' | 'sesudah' | 'verifikasi' | 'admin'>('beranda');
   const [judulVerifikasi, setJudulVerifikasi] = useState(
     'Pemegang Sertifikat Operasi Scaffolding LSP PEM INDONESIA'
   );
@@ -1074,6 +1737,7 @@ export default function App() {
           setJudulVerifikasi(judul);
           setPage('verifikasi');
         }}
+        onAdminLoginSuccess={() => setPage('admin')}
       />
     );
   }
@@ -1083,6 +1747,15 @@ export default function App() {
       <HalamanVerifikasi
         judul={judulVerifikasi}
         onBack={() => setPage('sesudah')}
+      />
+    );
+  }
+
+  if (page === 'admin') {
+    return (
+      <HalamanAdminDashboard
+        onKembali={() => setPage('sesudah')}
+        onLogout={() => setPage('sesudah')}
       />
     );
   }
