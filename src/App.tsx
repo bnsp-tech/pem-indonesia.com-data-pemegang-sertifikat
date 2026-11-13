@@ -8,9 +8,10 @@ import React, { useState } from 'react';
 interface HalamanSetelahNov2022Props {
   onBack?: () => void;
   onHome?: () => void;
+  onVerifikasi?: (judul: string) => void;
 }
 
-export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022Props) {
+export function HalamanSetelahNov2022({ onBack, onHome, onVerifikasi }: HalamanSetelahNov2022Props) {
   const [openBlock, setOpenBlock] = useState<string | null>(null);
 
   const institutions = [
@@ -341,6 +342,20 @@ export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022P
                             </div>
                             <button
                               type="button"
+                              onClick={() => {
+                                if (!onVerifikasi) return;
+                                if (scheme.title === 'Operator Scaffolding') {
+                                  onVerifikasi('Pemegang Sertifikat Operasi Scaffolding LSP PEM INDONESIA');
+                                  return;
+                                }
+                                const lembagaLabel =
+                                  block.id === 'pem-indonesia'
+                                    ? 'LSP PEM INDONESIA'
+                                    : block.id === 'geomigas'
+                                      ? 'PUSAT PENDIDIKAN GEOMIGAS'
+                                      : 'LSP K3';
+                                onVerifikasi(`Pemegang Sertifikat ${scheme.title} ${lembagaLabel}`);
+                              }}
                               className="mt-3.5 w-full rounded-[12px] bg-gradient-to-b from-[#A30E12] to-[#7D0609] py-2.5 px-4 text-center text-white text-[12.5px] font-extrabold tracking-[0.06em] uppercase shadow-[0_3px_8px_rgba(125,6,9,0.22)] cursor-pointer active:scale-[0.98] transition-transform"
                             >
                               VERIFIKASI
@@ -733,8 +748,313 @@ export function HalamanSebelumNov2022({ onBack, onHome }: HalamanSetelahNov2022P
   );
 }
 
+interface HalamanVerifikasiProps {
+  judul: string;
+  onBack: () => void;
+}
+
+export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
+  const [nik, setNik] = useState('');
+  const [tampilkanHasil, setTampilkanHasil] = useState(false);
+
+  const extractProgramName = (text: string) => {
+    return text
+      .replace(/^Pemegang Sertifikat\s+/i, '')
+      .replace(/\s+(LSP PEM INDONESIA|PUSAT PENDIDIKAN GEOMIGAS|LSP K3)$/i, '')
+      .toUpperCase();
+  };
+
+  const getDummyData = (judulText: string) => {
+    const lower = judulText.toLowerCase();
+    if (lower.includes('scaffolding')) {
+      return {
+        nama: 'BUDI SANTOSO',
+        program: lower.includes('pengawas') ? 'PENGAWAS SCAFFOLDING' : 'OPERATOR SCAFFOLDING',
+        noSertifikat: '78429.8113.0006812',
+        noRegister: 'F.2023.0006871',
+        tanggalTerbit: '25 September 2023',
+        berlakuSampai: '25 September 2026',
+        status: 'VALID AKTIF',
+      };
+    }
+    if (lower.includes('k3')) {
+      return {
+        nama: 'ANI WIJAYA',
+        program: extractProgramName(judulText),
+        noSertifikat: '78429.8113.0007429',
+        noRegister: 'F.2024.0008135',
+        tanggalTerbit: '14 Maret 2024',
+        berlakuSampai: '14 Maret 2027',
+        status: 'VALID AKTIF',
+      };
+    }
+    return {
+      nama: 'AHMAD FAUZI',
+      program: extractProgramName(judulText),
+      noSertifikat: '78429.8113.0009104',
+      noRegister: 'F.2024.0009420',
+      tanggalTerbit: '10 Juni 2024',
+      berlakuSampai: '10 Juni 2027',
+      status: 'VALID AKTIF',
+    };
+  };
+
+  const dummyData = getDummyData(judul);
+
+  const formatJudulLines = (text: string) => {
+    const match = text.match(/^(Pemegang Sertifikat)\s+(.+?)\s+(LSP PEM INDONESIA|PUSAT PENDIDIKAN GEOMIGAS|LSP K3)$/i);
+    if (match) {
+      return (
+        <>
+          {match[1]}
+          <br />
+          {match[2]}
+          <br />
+          {match[3]}
+        </>
+      );
+    }
+    return text;
+  };
+
+  const handleCari = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTampilkanHasil(true);
+  };
+
+  const handleClear = () => {
+    setNik('');
+    setTampilkanHasil(false);
+  };
+
+  return (
+    <div className="min-h-screen w-full bg-[#121215] flex justify-center font-sans antialiased">
+      {/* Mobile-only locked container (max-width: 430px) */}
+      <div className="w-full max-w-[430px] min-h-screen bg-[#FAF7F2] flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.65)] overflow-x-hidden px-4 pt-6 pb-8">
+        {/* Header Title & Subtitle */}
+        <header className="text-center px-2">
+          <h1 className="text-[22px] font-extrabold text-[#7D0609] leading-[1.3] tracking-[-0.015em]">
+            {formatJudulLines(judul)}
+          </h1>
+          <p className="mt-2.5 text-[13px] text-[#57534E] leading-[1.55]">
+            Integrasi sistem sertifikasi kompetensi industri modern berstandar nasional demi percepatan infrastruktur Indonesia.
+          </p>
+        </header>
+
+        {/* Main Yellow-Bordered Card with Overlapping LIVE DATABASE SYSTEM Badge */}
+        <section className="relative mt-7 rounded-[18px] border-[1.5px] border-[#EAB308] bg-white px-4 pt-8 pb-6 shadow-[0_4px_18px_rgba(180,130,20,0.06)]">
+          {/* Top-left Overlapping Maroon Pill Badge */}
+          <div className="absolute -top-3.5 left-4 inline-flex items-center gap-1.5 rounded-full bg-[#8B0B0E] px-3.5 py-1 shadow-xs">
+            <span className="w-2 h-2 rounded-full bg-[#FACC15]" />
+            <span className="text-white text-[10px] font-extrabold tracking-[0.06em] uppercase leading-none">
+              LIVE DATABASE SYSTEM
+            </span>
+          </div>
+
+          {/* Pinkish-Cream NIK Search Form Box */}
+          <form
+            onSubmit={handleCari}
+            className="rounded-[14px] bg-[#FDF2F2] border border-[#FCE7E7] p-4"
+          >
+            <label
+              htmlFor="input-nik"
+              className="block text-[12px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase mb-2"
+            >
+              KETIK NIK
+            </label>
+            <input
+              id="input-nik"
+              type="text"
+              inputMode="numeric"
+              value={nik}
+              onChange={(e) => setNik(e.target.value)}
+              className="w-full rounded-[10px] bg-white border-[1.5px] border-[#8B2326] px-3.5 py-2.5 text-[14px] text-[#1F2937] focus:outline-none focus:border-[#7D0609]"
+            />
+
+            <div className="mt-3 flex flex-col items-start gap-2.5">
+              <button
+                type="submit"
+                className="w-[116px] rounded-[10px] bg-gradient-to-b from-[#DC2626] to-[#B91C1C] border-b-[3px] border-b-[#7F1D1D] py-2.5 px-5 text-white text-[12.5px] font-extrabold tracking-[0.05em] uppercase shadow-sm cursor-pointer active:translate-y-[1px] transition-all"
+              >
+                CARI
+              </button>
+              <button
+                type="button"
+                onClick={handleClear}
+                className="w-[116px] rounded-[10px] bg-white border-[1.5px] border-[#991B1B] py-2 px-5 text-[#7F1D1D] text-[12.5px] font-extrabold tracking-[0.05em] uppercase cursor-pointer active:scale-[0.98] transition-transform"
+              >
+                CLEAR
+              </button>
+            </div>
+          </form>
+
+          {/* Dummy Data Result Section */}
+          {tampilkanHasil && (
+            <div className="mt-7 text-left">
+              <h2 className="text-[12px] font-extrabold text-[#7D0609] tracking-[0.04em] uppercase pb-2.5 border-b border-dashed border-[#E5E7EB]">
+                DATA PEMEGANG SERTIFIKAT
+              </h2>
+
+              <div className="mt-3 pt-1 pb-4 border-b border-dashed border-[#E5E7EB]">
+                <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase mb-2.5">
+                  FOTO PEMEGANG
+                </div>
+                <div className="w-[92px] h-[116px] rounded-[10px] border-[1.5px] border-[#EAB308] bg-white p-1 shadow-xs overflow-hidden">
+                  <div className="w-full h-full rounded-[6px] bg-gradient-to-b from-[#DBEAFE] to-[#BFDBFE] flex flex-col items-center justify-end overflow-hidden relative">
+                    {/* Minimalist Portrait Placeholder */}
+                    <div className="w-9 h-9 rounded-full bg-[#1E3A8A]/80 mb-1.5" />
+                    <div className="w-16 h-10 rounded-t-full bg-[#1D4ED8]" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="divide-y divide-dashed divide-[#E5E7EB]">
+                <div className="py-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
+                    NAMA PEMEGANG
+                  </div>
+                  <div className="mt-2 text-[14.5px] text-[#1F2937] uppercase">
+                    {dummyData.nama}
+                  </div>
+                </div>
+
+                <div className="py-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
+                    PROGRAM LPK
+                  </div>
+                  <div className="mt-2 text-[14.5px] text-[#1F2937] uppercase">
+                    {dummyData.program}
+                  </div>
+                </div>
+
+                <div className="py-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
+                    NO SERTIFIKAT BNSP
+                  </div>
+                  <div className="mt-2 text-[14.5px] text-[#1F2937]">
+                    {dummyData.noSertifikat}
+                  </div>
+                </div>
+
+                <div className="py-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
+                    NO REGISTER BNSP
+                  </div>
+                  <div className="mt-2 text-[14.5px] text-[#1F2937]">
+                    {dummyData.noRegister}
+                  </div>
+                </div>
+
+                <div className="py-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
+                    TANGGAL TERBIT
+                  </div>
+                  <div className="mt-2 text-[14.5px] text-[#1F2937]">
+                    {dummyData.tanggalTerbit}
+                  </div>
+                </div>
+
+                <div className="py-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
+                    BERLAKU SAMPAI
+                  </div>
+                  <div className="mt-2 text-[14.5px] text-[#1F2937]">
+                    {dummyData.berlakuSampai}
+                  </div>
+                </div>
+
+                <div className="py-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
+                    STATUS SERTIFIKAT
+                  </div>
+                  <div className="mt-2 text-[13px] font-extrabold text-[#7D0609] uppercase tracking-[0.02em]">
+                    {dummyData.status}
+                  </div>
+                </div>
+
+                <div className="pt-3.5">
+                  <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase mb-2.5">
+                    E-KARTU LSP BNSP
+                  </div>
+                  <div className="w-full h-[180px] rounded-[12px] bg-[#2D3139] relative overflow-hidden flex flex-col justify-between p-4 shadow-inner">
+                    <div className="absolute inset-0 flex flex-col justify-around opacity-[0.06] -rotate-12 scale-125 pointer-events-none select-none">
+                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
+                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+                      </div>
+                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
+                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+                      </div>
+                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
+                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+                      </div>
+                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
+                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+                      </div>
+                    </div>
+                    <div className="relative z-10 flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold text-[#FACC15] tracking-[0.08em] uppercase">
+                        E-KARTU KOMPETENSI BNSP
+                      </span>
+                      <span className="text-[9px] font-bold text-white/70 uppercase">
+                        RESMI
+                      </span>
+                    </div>
+                    <div className="relative z-10">
+                      <div className="text-[13px] font-extrabold text-white uppercase">
+                        {dummyData.nama}
+                      </div>
+                      <div className="text-[10.5px] text-white/75 uppercase mt-0.5">
+                        {dummyData.program}
+                      </div>
+                    </div>
+                    <div className="relative z-10 flex items-center justify-between text-[10px] text-white/70">
+                      <span>{dummyData.noRegister}</span>
+                      <span className="text-[#4ADE80] font-bold">{dummyData.status}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Bottom Return Button */}
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center justify-center gap-2.5 rounded-full bg-gradient-to-b from-[#990D11] to-[#6E0508] border-b-[3px] border-b-[#4A0305] px-7 py-3.5 text-white text-[12.5px] font-extrabold tracking-[0.05em] uppercase shadow-[0_6px_16px_rgba(125,6,9,0.28)] cursor-pointer active:scale-95 transition-transform"
+          >
+            <svg viewBox="0 0 24 24" className="w-[18px] h-[18px] shrink-0" fill="none">
+              <path d="M12 3L21 7.8L12 12.6L3 7.8L12 3Z" fill="#FFFFFF" />
+              <path
+                d="M3.5 12L12 16.5L20.5 12"
+                stroke="#FFFFFF"
+                strokeWidth="2.1"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M3.5 16.2L12 20.7L20.5 16.2"
+                stroke="#FFFFFF"
+                strokeWidth="2.1"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>PEMEGANG PROGRAM LAIN</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const [page, setPage] = useState<'beranda' | 'sebelum' | 'sesudah'>('beranda');
+  const [page, setPage] = useState<'beranda' | 'sebelum' | 'sesudah' | 'verifikasi'>('beranda');
+  const [judulVerifikasi, setJudulVerifikasi] = useState(
+    'Pemegang Sertifikat Operasi Scaffolding LSP PEM INDONESIA'
+  );
 
   if (page === 'sebelum') {
     return (
@@ -750,6 +1070,19 @@ export default function App() {
       <HalamanSetelahNov2022
         onBack={() => setPage('beranda')}
         onHome={() => setPage('beranda')}
+        onVerifikasi={(judul) => {
+          setJudulVerifikasi(judul);
+          setPage('verifikasi');
+        }}
+      />
+    );
+  }
+
+  if (page === 'verifikasi') {
+    return (
+      <HalamanVerifikasi
+        judul={judulVerifikasi}
+        onBack={() => setPage('sesudah')}
       />
     );
   }
