@@ -938,101 +938,14 @@ export function HalamanSetelahNov2022({
                 </div>
 
                 {/* STANDAR AKREDITASI & LISENSI LEMBAGA */}
-                <div className="rounded-[16px] border border-[#F4E3B6] bg-white px-2.5 py-4 text-center">
-                  <h3 className="text-[11px] font-extrabold text-[#5E0A0C] tracking-[0.05em] uppercase mb-3.5">
-                    STANDAR AKREDITASI &amp; LISENSI LEMBAGA
-                  </h3>
-
-                  {/* 6 Accreditation & License Logos */}
-                  <div className="flex items-center justify-between gap-1 px-0.5">
-                    {/* 1. KEMNAKER */}
-                    <div className="flex flex-col items-center justify-center w-[46px] shrink-0">
-                      <svg viewBox="0 0 36 30" className="w-[32px] h-[26px]">
-                        <g fill="none" stroke="#1E3A5F" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M18 3L27 12L18 21L9 12L18 3Z" />
-                          <path d="M18 7.5L22.5 12L18 16.5L13.5 12L18 7.5Z" />
-                          <path d="M11 6L25 20" strokeWidth="1.6" />
-                          <path d="M25 6L11 20" strokeWidth="1.6" />
-                        </g>
-                      </svg>
-                      <span className="text-[6.5px] font-extrabold text-[#1E3A5F] tracking-[0.04em] leading-none mt-0.5">
-                        KEMNAKER
-                      </span>
-                    </div>
-
-                    {/* 2. Crest Emblem */}
-                    <div className="flex items-center justify-center w-[32px] shrink-0">
-                      <svg viewBox="0 0 36 36" className="w-[30px] h-[30px]">
-                        <circle cx="18" cy="18" r="16" fill="#1C2536" stroke="#D4A62A" strokeWidth="1.8" />
-                        <circle cx="18" cy="18" r="12.5" fill="none" stroke="#E8C24E" strokeWidth="0.8" />
-                        <path d="M10 18L18 10L26 18L18 26Z" fill="#D4A62A" opacity="0.85" />
-                        <circle cx="18" cy="18" r="4.5" fill="#1C2536" stroke="#FFE082" strokeWidth="1" />
-                        <path d="M12 24.5C15 27 21 27 24 24.5" stroke="#F5C542" strokeWidth="1.3" fill="none" />
-                      </svg>
-                    </div>
-
-                    {/* 3. G-CERT ISO 9001:2015 */}
-                    <div className="flex flex-col items-center justify-center border border-[#E5E7EB] rounded-[3px] px-1.5 py-1 bg-white shrink-0">
-                      <div className="flex items-center gap-0.5 leading-none">
-                        <span className="text-[8.5px] font-black text-[#111827] tracking-tight">G-CERT</span>
-                        <span className="text-[8px] font-black text-[#B91C1C]">2</span>
-                      </div>
-                      <div className="w-full h-[1px] bg-[#DC2626] my-[1.5px]" />
-                      <span className="text-[4.5px] font-extrabold text-[#DC2626] tracking-[0.03em] leading-none">
-                        SYSTEM SERVICE
-                      </span>
-                      <span className="text-[4.8px] font-bold text-[#374151] leading-none mt-[1.5px]">
-                        ISO 9001:2015
-                      </span>
-                    </div>
-
-                    {/* 4. LA-LPK */}
-                    <div className="flex items-center justify-center w-[34px] shrink-0">
-                      <svg viewBox="0 0 38 38" className="w-[32px] h-[32px]">
-                        <circle cx="19" cy="19" r="17" fill="#FFFFFF" stroke="#9CA3AF" strokeWidth="0.9" strokeDasharray="2 1" />
-                        <circle cx="19" cy="19" r="13.5" fill="none" stroke="#D97706" strokeWidth="0.7" />
-                        <path d="M19 9L28 24H10L19 9Z" fill="none" stroke="#D97706" strokeWidth="1.8" strokeLinejoin="round" />
-                        <text x="19" y="21.5" textAnchor="middle" fill="#B45309" fontSize="5" fontWeight="800">
-                          LA-LPK
-                        </text>
-                      </svg>
-                    </div>
-
-                    {/* 5. BNSP */}
-                    <div className="flex flex-col items-center justify-center shrink-0 px-0.5">
-                      <div className="flex items-center gap-0.5 leading-none">
-                        <svg viewBox="0 0 18 16" className="w-[14px] h-[12px]">
-                          <path d="M2 8L7 13L16 3" stroke="#991B1B" strokeWidth="2.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                          <path d="M1 4L6 9" stroke="#DC2626" strokeWidth="1.8" fill="none" strokeLinecap="round" />
-                        </svg>
-                        <span className="text-[11px] font-black text-[#111827] tracking-tight">BNSP</span>
-                      </div>
-                      <span className="text-[3.8px] font-bold text-[#4B5563] tracking-[0.02em] leading-none mt-[2px]">
-                        BADAN NASIONAL SERTIFIKASI PROFESI
-                      </span>
-                    </div>
-
-                    {/* 6. CERTIFIED ISO 45001:2018 COMPANY */}
-                    <div className="flex items-center justify-center w-[34px] shrink-0">
-                      <svg viewBox="0 0 38 38" className="w-[32px] h-[32px]">
-                        <circle cx="19" cy="19" r="17" fill="#E0F2FE" stroke="#0284C7" strokeWidth="1.6" />
-                        <circle cx="19" cy="19" r="13.5" fill="#FFFFFF" stroke="#0369A1" strokeWidth="0.9" />
-                        <rect x="4" y="13.5" width="30" height="11" rx="2" fill="#0369A1" />
-                        <text x="19" y="10.5" textAnchor="middle" fill="#0369A1" fontSize="4.2" fontWeight="800">
-                          CERTIFIED
-                        </text>
-                        <text x="19" y="19.5" textAnchor="middle" fill="#FFFFFF" fontSize="6.5" fontWeight="900">
-                          ISO
-                        </text>
-                        <text x="19" y="23.5" textAnchor="middle" fill="#E0F2FE" fontSize="3.8" fontWeight="700">
-                          45001:2018
-                        </text>
-                        <text x="19" y="30" textAnchor="middle" fill="#0369A1" fontSize="4" fontWeight="800">
-                          COMPANY
-                        </text>
-                      </svg>
-                    </div>
-                  </div>
+                <div className="w-full overflow-hidden rounded-[16px] bg-white">
+                  <img
+                    src="/assets/aistudio/1794592463956_24597219.png"
+                    alt="Standar Akreditasi dan Lisensi Lembaga - Kemnaker, ESDM, G-CERTi ISO 9001:2015, LA-LPK, BNSP, ISO 45001:2018"
+                    className="w-full h-auto object-contain block select-none pointer-events-none"
+                    loading="eager"
+                    draggable={false}
+                  />
                 </div>
               </div>
             </section>
