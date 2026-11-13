@@ -11,6 +11,8 @@ interface HalamanSetelahNov2022Props {
 }
 
 export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022Props) {
+  const [openBlock, setOpenBlock] = useState<string | null>(null);
+
   const institutions = [
     {
       id: 'geomigas',
@@ -31,6 +33,15 @@ export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022P
           <path d="M21.9 14.2L17.6 16.5V21L21.9 18.7V14.2Z" fill="#9E1318" />
         </svg>
       ),
+      items: [
+        { title: 'Operator K3 Migas', subtitle: 'Subsektor Minyak, Gas, dan Geologi' },
+        { title: 'Pengawas K3 Migas', subtitle: 'Subsektor Minyak, Gas, dan Geologi' },
+        { title: 'Supervisor K3 Tambang', subtitle: 'Subsektor Pertambangan Mineral & Batubara' },
+        { title: 'Operator K3 Listrik', subtitle: 'Sistem Ketenagalistrikan Industri' },
+        { title: 'Teknisi K3 Listrik', subtitle: 'Sistem Ketenagalistrikan Industri' },
+        { title: 'Ahli K3 Listrik', subtitle: 'Sistem Ketenagalistrikan Industri' },
+        { title: 'Auditor SMK3 Tambang', subtitle: 'Audit Manajemen Keselamatan Pertambangan' },
+      ],
     },
     {
       id: 'pem-indonesia',
@@ -54,6 +65,30 @@ export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022P
           />
         </svg>
       ),
+      items: [
+        { title: 'Operator Scaffolding', subtitle: 'Konstruksi & Industri Penunjang' },
+        { title: 'Pengawas Scaffolding', subtitle: 'Konstruksi & Industri Penunjang' },
+        { title: 'Operator K3 Umum', subtitle: 'Kesehatan Keselamatan Kerja K3' },
+        { title: 'Petugas K3 Umum', subtitle: 'Kesehatan Keselamatan Kerja K3' },
+        { title: 'Ahli K3 Umum', subtitle: 'Kesehatan Keselamatan Kerja K3' },
+        { title: 'K3 Ruang Terbatas (Confined Space)', subtitle: 'Kualifikasi Khusus Paparan Risiko' },
+        { title: 'Petugas Gas H2S', subtitle: 'Kualifikasi Deteksi Gas Berbahaya' },
+        { title: 'Authorized Gas Tester', subtitle: 'Pengujian Gas Atmosfer Spesifik' },
+        { title: 'Operator Excavator', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
+        { title: 'Operator Backhoe', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
+        { title: 'Operator Loader', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
+        { title: 'Operator Dumptruck', subtitle: 'Transportasi Material Industri' },
+        { title: 'Operator Dozer', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
+        { title: 'Operator Motorgrader', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
+        { title: 'Operator Mobile Crane', subtitle: 'Sertifikasi Angkat & Angkut (PAA)' },
+        { title: 'Operator Forklift', subtitle: 'Sertifikasi Angkat & Angkut (PAA)' },
+        { title: 'Operator Overhead Crane', subtitle: 'Sertifikasi Angkat & Angkut (PAA)' },
+        { title: 'Operator Pedestal Crane', subtitle: 'Sertifikasi Angkat & Angkut (PAA)' },
+        { title: 'Juru Ikat Beban / Rigger', subtitle: 'Sertifikasi Angkat & Angkut (PAA)' },
+        { title: 'Inspector Pesawat Angkat', subtitle: 'Kualifikasi Penguji Kelaikan Alat' },
+        { title: 'Petugas Fire Safety', subtitle: 'Penanggulangan Bahaya Kebakaran' },
+        { title: 'Petugas First Aid', subtitle: 'Pertolongan Pertama Kecelakaan Kerja' },
+      ],
     },
     {
       id: 'lsp-k3',
@@ -69,6 +104,15 @@ export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022P
           <path d="M15.5 15.2L16.8 21.5L13.3 19.6L12 21.5V15.5H15.5V15.2Z" fill="#9E1318" />
         </svg>
       ),
+      items: [
+        { title: 'Petugas K3 Umum', subtitle: 'Sertifikasi Kompetensi BNSP' },
+        { title: 'Ahli K3 Umum', subtitle: 'Sertifikasi Kompetensi BNSP' },
+        { title: 'Teknisi K3 Ketinggian', subtitle: 'Sertifikasi Bekerja Pada Ketinggian' },
+        { title: 'Ahli Muda Ruang Terbatas', subtitle: 'Sertifikasi Kompetensi BNSP' },
+        { title: 'Ahli Madya Ruang Terbatas', subtitle: 'Sertifikasi Kompetensi BNSP' },
+        { title: 'Auditor SMK3 Umum', subtitle: 'Sertifikasi Sistem Manajemen Nasional' },
+        { title: 'Operator K3 Alat Berat', subtitle: 'Sertifikasi Operator K3 Ragam Alat' },
+      ],
     },
   ];
 
@@ -216,27 +260,98 @@ export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022P
             {/* Subtle Dashed Divider */}
             <div className="my-5 border-t border-dashed border-[#EDE7DC]" />
 
-            {/* 3 Institution Cards */}
+            {/* 3 Expandable Institution Blocks */}
             <div className="space-y-3.5">
-              {institutions.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="w-full rounded-[18px] bg-gradient-to-b from-[#FFFFFF] to-[#FFFDF8] border border-[#F3E6CA] shadow-[0_4px_12px_rgba(150,110,40,0.06)] px-4 py-[15px] flex items-center justify-between gap-3 text-left cursor-pointer active:scale-[0.99] transition-transform"
-                >
-                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    {item.icon}
-                    <span className="text-[13.5px] font-extrabold text-[#5E0A0C] uppercase tracking-[0.02em] leading-[1.35]">
-                      {item.name}
-                    </span>
+              {institutions.map((block) => {
+                const isOpen = openBlock === block.id;
+                return (
+                  <div
+                    key={block.id}
+                    className={`rounded-[18px] overflow-hidden transition-all ${
+                      isOpen
+                        ? 'border-[1.5px] border-[#EAB308] bg-[#FFFEFA] shadow-[0_6px_18px_rgba(180,130,20,0.10)]'
+                        : 'border border-[#F3E6CA] bg-gradient-to-b from-[#FFFFFF] to-[#FFFDF8] shadow-[0_4px_12px_rgba(150,110,40,0.06)]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setOpenBlock(isOpen ? null : block.id)}
+                      aria-expanded={isOpen}
+                      className={`w-full px-4 py-[15px] flex items-center justify-between gap-3 text-left cursor-pointer transition-colors ${
+                        isOpen ? 'bg-[#FFF9E6] border-b border-[#F5E6B8]' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                        {block.icon}
+                        <span className="text-[13.5px] font-extrabold text-[#5E0A0C] uppercase tracking-[0.02em] leading-[1.35]">
+                          {block.name}
+                        </span>
+                      </div>
+                      <div
+                        className={`w-[34px] h-[34px] rounded-full shrink-0 flex items-center justify-center transition-colors ${
+                          isOpen
+                            ? 'bg-gradient-to-b from-[#FACC15] to-[#EAB308] border border-[#D99B08]/40 shadow-[0_2px_6px_rgba(217,155,8,0.3)]'
+                            : 'bg-[#FFFDF9] border border-[#EED9A8] shadow-[0_2px_6px_rgba(180,140,60,0.12)]'
+                        }`}
+                      >
+                        {isOpen ? (
+                          <svg viewBox="0 0 24 24" className="w-[16px] h-[16px] text-[#450A0A]" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 15l-6-6-6 6" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" className="w-[16px] h-[16px] text-[#5E0A0C]" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M6 9l6 6 6-6" />
+                          </svg>
+                        )}
+                      </div>
+                    </button>
+
+                    {isOpen && (
+                      <div className="p-3.5 space-y-3 bg-[#FFFEFB]">
+                        {block.items.map((scheme) => (
+                          <div
+                            key={scheme.title}
+                            className="rounded-[16px] bg-white border border-[#EFEAE0] shadow-[0_2px_8px_rgba(0,0,0,0.03)] p-4 text-left"
+                          >
+                            <h3 className="text-[15px] font-bold text-[#1F2937] leading-snug">
+                              {scheme.title}
+                            </h3>
+                            <p className="mt-0.5 text-[12.5px] text-[#6B7280] leading-snug">
+                              {scheme.subtitle}
+                            </p>
+                            <div className="mt-3 flex items-center gap-2">
+                              <span className="text-[12px] text-[#4B5563] font-medium">
+                                Status:
+                              </span>
+                              <span className="inline-flex items-center gap-1 rounded-full bg-[#FEF3C7] border border-[#F5D76E] px-2.5 py-[3px]">
+                                <svg viewBox="0 0 16 16" className="w-[12px] h-[12px] shrink-0" fill="none">
+                                  <circle cx="8" cy="8" r="7" fill="#A16207" />
+                                  <path
+                                    d="M5 8.2L7 10.2L11.2 5.8"
+                                    stroke="#FFFFFF"
+                                    strokeWidth="1.8"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                                <span className="text-[10.5px] font-extrabold text-[#78350F] tracking-[0.04em] uppercase leading-none">
+                                  AKTIF
+                                </span>
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="mt-3.5 w-full rounded-[12px] bg-gradient-to-b from-[#A30E12] to-[#7D0609] py-2.5 px-4 text-center text-white text-[12.5px] font-extrabold tracking-[0.06em] uppercase shadow-[0_3px_8px_rgba(125,6,9,0.22)] cursor-pointer active:scale-[0.98] transition-transform"
+                            >
+                              VERIFIKASI
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="w-[34px] h-[34px] rounded-full shrink-0 bg-[#FFFDF9] border border-[#EED9A8] shadow-[0_2px_6px_rgba(180,140,60,0.12)] flex items-center justify-center">
-                    <svg viewBox="0 0 24 24" className="w-[16px] h-[16px] text-[#4B5563]" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M6 9l6 6 6-6" />
-                    </svg>
-                  </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
 
             {/* INFORMASI LEMBAGA Section Card */}
@@ -440,14 +555,201 @@ export function HalamanSetelahNov2022({ onBack, onHome }: HalamanSetelahNov2022P
   );
 }
 
-export default function App() {
-  const [halaman, setHalaman] = useState<'beranda' | 'sesudah'>('beranda');
+export function HalamanSebelumNov2022({ onBack, onHome }: HalamanSetelahNov2022Props) {
+  const [query, setQuery] = useState('');
 
-  if (halaman === 'sesudah') {
+  return (
+    <div className="min-h-screen w-full bg-[#121215] flex justify-center font-sans antialiased">
+      {/* Mobile-only locked container (max-width: 430px) */}
+      <div className="w-full max-w-[430px] min-h-screen bg-[#FAF7F2] flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.65)] overflow-x-hidden">
+        {/* Top Header Bar */}
+        <header className="sticky top-0 z-30 bg-gradient-to-b from-[#940D12] via-[#830A0E] to-[#710609] border-b-[3px] border-[#DFAC2A] px-3.5 py-2.5 flex items-center justify-between gap-2.5 shadow-sm">
+          {/* Left Back Button */}
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Kembali"
+            className="w-[42px] h-[42px] shrink-0 rounded-[12px] bg-[#9E1C20]/75 border border-[#C74F53]/45 flex items-center justify-center text-white cursor-pointer active:scale-95 transition-transform"
+          >
+            <svg viewBox="0 0 24 24" className="w-[20px] h-[20px]" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5" />
+              <path d="M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          {/* Center Brand Logo & Title */}
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="relative w-[46px] h-[46px] shrink-0">
+              <svg viewBox="0 0 64 64" className="w-full h-full drop-shadow-sm">
+                <defs>
+                  <linearGradient id="apikGoldRingSeb" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#FFE57F" />
+                    <stop offset="50%" stopColor="#D99B16" />
+                    <stop offset="100%" stopColor="#9A6808" />
+                  </linearGradient>
+                  <radialGradient id="apikMaroonBgSeb" cx="50%" cy="45%" r="55%">
+                    <stop offset="0%" stopColor="#9C1418" />
+                    <stop offset="100%" stopColor="#4F0406" />
+                  </radialGradient>
+                </defs>
+                <circle cx="32" cy="32" r="30.5" fill="url(#apikMaroonBgSeb)" stroke="url(#apikGoldRingSeb)" strokeWidth="2.5" />
+                <circle cx="32" cy="32" r="22.5" fill="none" stroke="#E5B942" strokeWidth="1" strokeOpacity="0.85" />
+                <g opacity="0.95">
+                  <path d="M32 13L33.3 17H37.5L34.1 19.4L35.4 23.3L32 20.9L28.6 23.3L29.9 19.4L26.5 17H30.7L32 13Z" fill="#F8D25C" />
+                  <path d="M21 38C21 29.5 26 24 32 24C38 24 43 29.5 43 38" fill="none" stroke="#F4C446" strokeWidth="1.6" />
+                  <path d="M19 37C21 43 26.5 47 32 47C37.5 47 43 43 45 37" fill="none" stroke="#E8B838" strokeWidth="2" strokeDasharray="2.2 1.8" />
+                  <rect x="23" y="29" width="18" height="9" rx="2" fill="#63080A" stroke="#F4C446" strokeWidth="0.9" />
+                  <text x="32" y="35.5" textAnchor="middle" fill="#FCE28B" fontSize="6.5" fontWeight="800" fontFamily="sans-serif">
+                    APIK
+                  </text>
+                </g>
+                <text fill="#F7D56B" fontSize="4.3" fontWeight="700" letterSpacing="0.45">
+                  <textPath href="#ringPathTopSeb" startOffset="50%" textAnchor="middle">
+                    AFILIASI PENGEMBANGAN
+                  </textPath>
+                </text>
+                <defs>
+                  <path id="ringPathTopSeb" d="M 8,32 A 24,24 0 1,1 56,32" />
+                </defs>
+              </svg>
+              <span className="absolute bottom-0 right-0 w-[12px] h-[12px] rounded-full bg-[#22C55E] border-[2px] border-[#78080B]" />
+            </div>
+
+            <div className="min-w-0 leading-tight">
+              <div className="text-[11.5px] font-extrabold text-white tracking-[0.02em] leading-[1.22] uppercase">
+                AFILIASI PENGEMBANGAN
+                <br />
+                INDONESIA KOMPETEN
+              </div>
+              <div className="mt-0.5 flex items-center gap-1">
+                <span className="text-[10px] font-extrabold text-[#F5C542] tracking-[0.06em] uppercase">
+                  PORTAL RESMI
+                </span>
+                <svg viewBox="0 0 20 20" className="w-[12px] h-[12px] shrink-0" fill="none">
+                  <path
+                    d="M10 1.5L12.1 3.1L14.7 2.8L15.6 5.3L18 6.4L17.5 9L18.9 11.2L17.1 13.1L17.2 15.7L14.7 16.4L13.3 18.6L10.8 17.8L8.4 18.8L6.7 16.8L4.1 16.5L3.9 13.9L1.9 12.2L3 9.8L2.2 7.2L4.4 5.8L5 3.2L7.6 3.2L10 1.5Z"
+                    fill="#F5C542"
+                  />
+                  <path
+                    d="M6.8 10.2L9 12.4L13.4 7.8"
+                    stroke="#75070A"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Home Button */}
+          <button
+            type="button"
+            onClick={onHome}
+            aria-label="Beranda"
+            className="w-[42px] h-[42px] shrink-0 rounded-[12px] bg-gradient-to-b from-[#FCE068] via-[#F2B926] to-[#DC9D13] border border-[#FFE98E]/65 shadow-[0_2px_6px_rgba(0,0,0,0.28)] flex items-center justify-center cursor-pointer active:scale-95 transition-transform"
+          >
+            <svg viewBox="0 0 24 24" className="w-[20px] h-[20px]" fill="none" stroke="#2D0909" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 10.5L12 3l9 7.5" />
+              <path d="M5 9.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V9.5" />
+              <path d="M9.5 20.5v-6a1.5 1.5 0 0 1 1.5-1.5h2a1.5 1.5 0 0 1 1.5 1.5v6" />
+            </svg>
+          </button>
+        </header>
+
+        {/* Main Content Area */}
+        <main className="flex-1 px-3.5 pt-4 pb-5 flex flex-col justify-center">
+          <div className="bg-white rounded-[24px] border-[1.5px] border-[#F2DA9C] shadow-[0_6px_22px_rgba(140,100,20,0.06)] px-4 pt-6 pb-6">
+            {/* Top Pill Badge */}
+            <div className="flex justify-center">
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#87080B] via-[#A20F14] to-[#87080B] px-4 py-1.5 border border-[#D4A024]/30 shadow-[0_4px_12px_rgba(135,8,11,0.28)]">
+                <svg viewBox="0 0 20 20" className="w-[13px] h-[13px] shrink-0" fill="#F5C542">
+                  <path d="M10 1.8L3.5 4.5V9.5C3.5 13.7 6.3 17.5 10 18.7C13.7 17.5 16.5 13.7 16.5 9.5V4.5L10 1.8Z" />
+                </svg>
+                <span className="text-[11px] font-bold text-[#F9E29C] tracking-[0.12em] uppercase leading-none">
+                  APIK EDU INDONESIA
+                </span>
+              </div>
+            </div>
+
+            {/* Heading */}
+            <h1 className="mt-4 text-center text-[24px] font-extrabold text-[#7D0609] tracking-[-0.015em] leading-tight">
+              Pencarian Arsip
+            </h1>
+
+            {/* Subtitle */}
+            <p className="mt-3 text-center text-[13.5px] text-[#6B7280] leading-[1.55] px-1">
+              Data pemegang sertifikat kompetensi sebelum{' '}
+              <strong className="font-bold text-[#7D0609]">01 November 2022</strong>.
+              Masukkan nama atau nomor sertifikat pada kolom di bawah ini.
+            </p>
+
+            {/* Subtle Dashed Divider */}
+            <div className="my-5 border-t border-dashed border-[#EDE7DC]" />
+
+            {/* Search Bar + Cari Button (Gimmick Only) */}
+            <form
+              onSubmit={(e) => e.preventDefault()}
+              className="rounded-[18px] bg-gradient-to-b from-[#FFFFFF] to-[#FFFDF8] border border-[#F3E6CA] shadow-[0_4px_12px_rgba(150,110,40,0.06)] p-4 space-y-3"
+            >
+              <div className="relative flex items-center">
+                <span className="absolute left-3.5 text-[#9E1318] pointer-events-none">
+                  <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="M21 21l-4.35-4.35" />
+                  </svg>
+                </span>
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Cari nama atau nomor sertifikat..."
+                  className="w-full rounded-[14px] bg-white border-[1.5px] border-[#EED9A8] pl-10 pr-3.5 py-3 text-[13.5px] text-[#374151] placeholder:text-[#9CA3AF] focus:outline-none focus:border-[#9E1318]"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full rounded-[14px] bg-gradient-to-r from-[#87080B] via-[#A20F14] to-[#87080B] border-b-[4px] border-b-[#5E0507] py-3 px-4 text-white text-[14px] font-extrabold tracking-[0.04em] uppercase cursor-pointer active:translate-y-[1px] active:border-b-[2.5px] transition-all shadow-[0_4px_12px_rgba(135,8,11,0.22)]"
+              >
+                Cari
+              </button>
+            </form>
+          </div>
+        </main>
+
+        {/* Footer */}
+        <footer className="px-6 pt-1 pb-7 text-center">
+          <p className="text-[11.5px] text-[#6B7280] leading-[1.5]">
+            © 2026{' '}
+            <span className="font-bold text-[#7D0609]">
+              Asosiasi Pengembangan Indonesia Kompeten (APIK)
+            </span>
+            . All Rights Reserved.
+          </p>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [page, setPage] = useState<'beranda' | 'sebelum' | 'sesudah'>('beranda');
+
+  if (page === 'sebelum') {
+    return (
+      <HalamanSebelumNov2022
+        onBack={() => setPage('beranda')}
+        onHome={() => setPage('beranda')}
+      />
+    );
+  }
+
+  if (page === 'sesudah') {
     return (
       <HalamanSetelahNov2022
-        onBack={() => setHalaman('beranda')}
-        onHome={() => setHalaman('beranda')}
+        onBack={() => setPage('beranda')}
+        onHome={() => setPage('beranda')}
       />
     );
   }
@@ -478,7 +780,7 @@ export default function App() {
           {/* Option: Sebelum 01 November 2022 */}
           <button
             type="button"
-            onClick={() => console.log('Pilihan dipilih: sebelum 01 November 2022')}
+            onClick={() => setPage('sebelum')}
             className="flex flex-col items-center text-center group cursor-pointer focus:outline-none transition-transform active:scale-95"
             aria-label="Sebelum 01 November 2022"
           >
@@ -502,7 +804,7 @@ export default function App() {
           {/* Option: Sesudah 01 November 2022 */}
           <button
             type="button"
-            onClick={() => setHalaman('sesudah')}
+            onClick={() => setPage('sesudah')}
             className="flex flex-col items-center text-center group cursor-pointer focus:outline-none transition-transform active:scale-95"
             aria-label="Sesudah 01 November 2022"
           >
