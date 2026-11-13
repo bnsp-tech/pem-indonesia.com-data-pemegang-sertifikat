@@ -1195,6 +1195,17 @@ export function HalamanVerifikasi({
     return text;
   };
 
+  const namaProgram = (() => {
+    if (jenisData && jenisData.includes('::')) {
+      return jenisData.split('::')[1].trim();
+    }
+    const cleaned = judul
+      .replace(/^Pemegang Sertifikat\s+/i, '')
+      .replace(/\s+(LSP PEM INDONESIA|PUSAT PENDIDIKAN GEOMIGAS|LSP K3)$/i, '')
+      .trim();
+    return cleaned || 'Program Sertifikasi';
+  })();
+
   const performLookup = useCallback(
     async (rawNik: string) => {
       const inputNik = rawNik.trim();
@@ -1213,68 +1224,47 @@ export function HalamanVerifikasi({
       setQrCodeUrl('');
 
       try {
-        const { data, error } = await supabase
+        const programFilterUpper = namaProgram.toUpperCase();
+
+        // Filter berdasarkan NIK dan program_lpk (1 NIK bisa memiliki banyak sertifikat di program berbeda)
+        const { data: exactRows, error } = await supabase
           .from('data_pemegang')
           .select('*')
           .eq('nik', inputNik)
-          .single();
+          .eq('program_lpk', programFilterUpper)
+          .order('id', { ascending: false });
 
         if (error) {
-          // PGRST116 occurs when .single() returns 0 rows (data kosong) or >1 rows
-          if (error.code === 'PGRST116') {
-            const details = `${error.details ?? ''} ${error.message ?? ''}`.toLowerCase();
-            const isMultipleRows =
-              !details.includes('0 rows') &&
-              (/contains\s+[2-9]\d*\s+rows|contains\s+\d{2,}\s+rows|multiple/i.test(details));
-
-            if (!isMultipleRows) {
-              // Data tidak ditemukan / kosong
-              setHasilData(null);
-              return;
-            }
-
-            // Jika ada lebih dari 1 sertifikat untuk NIK yang sama, ambil yang paling relevan
-            const { data: multiRows, error: multiErr } = await supabase
-              .from('data_pemegang')
-              .select('*')
-              .eq('nik', inputNik)
-              .order('id', { ascending: false });
-
-            if (multiErr) {
-              throw new Error(multiErr.message);
-            }
-
-            const rows = (multiRows as PemegangSertifikatRow[] | null) ?? [];
-            if (rows.length === 0) {
-              setHasilData(null);
-              return;
-            }
-
-            const schemeTitle = jenisData?.split('::')[1]?.toLowerCase() ?? '';
-            const matchedRow =
-              (jenisData ? rows.find((r) => r.jenis_data === jenisData) : undefined) ||
-              (schemeTitle
-                ? rows.find(
-                    (r) =>
-                      r.jenis_data?.toLowerCase().includes(schemeTitle) ||
-                      r.program_lpk?.toLowerCase().includes(schemeTitle)
-                  )
-                : undefined) ||
-              rows[0];
-
-            setHasilData(matchedRow);
-            return;
-          }
-
           throw new Error(error.message);
         }
 
-        if (!data) {
+        let rows = (exactRows as PemegangSertifikatRow[] | null) ?? [];
+
+        // Fallback case-insensitive jika program_lpk di Supabase ditulis dengan huruf besar-kecil (Title Case)
+        if (rows.length === 0) {
+          const { data: ilikeRows, error: ilikeErr } = await supabase
+            .from('data_pemegang')
+            .select('*')
+            .eq('nik', inputNik)
+            .ilike('program_lpk', namaProgram)
+            .order('id', { ascending: false });
+
+          if (ilikeErr) {
+            throw new Error(ilikeErr.message);
+          }
+
+          rows = (ilikeRows as PemegangSertifikatRow[] | null) ?? [];
+        }
+
+        if (rows.length === 0) {
           setHasilData(null);
           return;
         }
 
-        setHasilData(data as PemegangSertifikatRow);
+        const matchedRow =
+          (jenisData ? rows.find((r) => r.jenis_data === jenisData) : undefined) || rows[0];
+
+        setHasilData(matchedRow);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Gagal terhubung ke database Supabase.';
         setErrorMsg(`Terjadi kesalahan saat mencari data: ${message}`);
@@ -1282,7 +1272,7 @@ export function HalamanVerifikasi({
         setLoading(false);
       }
     },
-    [jenisData]
+    [jenisData, namaProgram]
   );
 
   useEffect(() => {
@@ -1473,7 +1463,7 @@ export function HalamanVerifikasi({
                   DATA TIDAK DITEMUKAN
                 </div>
                 <p className="mt-1 text-[13px] text-[#7F1D1D] font-semibold leading-relaxed">
-                  Data tidak ditemukan. Pastikan NIK yang Anda masukkan benar.
+                  Data tidak ditemukan di program {namaProgram}
                 </p>
               </div>
             </div>
