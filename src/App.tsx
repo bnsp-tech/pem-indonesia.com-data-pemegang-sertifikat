@@ -3,12 +3,465 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import QRCode from 'qrcode';
+
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL || 'https://neptkinlbxcrdwxoikyg.supabase.co';
+const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_4iOdbJUqzRZ-mVSALQwlAw_Oe5LLU1d';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+export interface PemegangSertifikatRow {
+  id: string | number;
+  tanggal_terbit: string | null;
+  berlaku_sampai: string | null;
+  jenis_data: string | null;
+  nama_pemegang: string | null;
+  nik: string | null;
+  program_lpk: string | null;
+  no_sertifikat_bnsp: string | null;
+  no_register_bnsp: string | null;
+  status_sertifikat: string | null;
+  url_foto: string | null;
+  url_e_kartu: string | null;
+}
+
+const BULAN_INDONESIA = [
+  'Januari',
+  'Februari',
+  'Maret',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Agustus',
+  'September',
+  'Oktober',
+  'November',
+  'Desember',
+];
+
+function formatTanggalIndonesia(dateStr?: string | null): string {
+  if (!dateStr) return '-';
+  const trimmed = dateStr.trim();
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const year = isoMatch[1];
+    const monthIdx = Number(isoMatch[2]) - 1;
+    const day = Number(isoMatch[3]);
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${day} ${BULAN_INDONESIA[monthIdx]} ${year}`;
+    }
+  }
+  return trimmed;
+}
+
+function buildVerificationUrl(nik: string, jenisData?: string | null): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const params = new URLSearchParams();
+  params.set('nik', nik.trim());
+  if (jenisData) {
+    params.set('jenis', jenisData);
+  }
+  return `${origin}/?${params.toString()}`;
+}
+
+async function uploadFileToSupabaseBucket(
+  fileOrBlob: File | Blob,
+  folder: 'foto' | 'ekartu',
+  identifier: string
+): Promise<string> {
+  const safeId = identifier.replace(/[^a-zA-Z0-9_-]/g, '') || 'pemegang';
+  let ext = 'png';
+  let contentType = fileOrBlob.type || 'image/png';
+  if (fileOrBlob instanceof File && fileOrBlob.name.includes('.')) {
+    const rawExt = fileOrBlob.name.split('.').pop()?.toLowerCase();
+    if (rawExt) ext = rawExt.replace(/[^a-z0-9]/g, '') || 'png';
+  } else if (contentType.includes('jpeg') || contentType.includes('jpg')) {
+    ext = 'jpg';
+  } else if (contentType.includes('webp')) {
+    ext = 'webp';
+  }
+
+  const filePath = `${folder}/${safeId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+  const { error: uploadError } = await supabase.storage
+    .from('files')
+    .upload(filePath, fileOrBlob, {
+      upsert: true,
+      contentType,
+    });
+
+  if (uploadError) {
+    throw new Error(`Upload ke bucket 'files' gagal: ${uploadError.message}`);
+  }
+
+  const { data } = supabase.storage.from('files').getPublicUrl(filePath);
+  if (!data?.publicUrl) {
+    throw new Error("Gagal mendapatkan public URL dari bucket 'files'.");
+  }
+  return data.publicUrl;
+}
+
+function drawRoundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+function loadImageSafe(src?: string | null): Promise<HTMLImageElement | null> {
+  if (!src) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (!src.startsWith('data:') && !src.startsWith('blob:')) {
+      img.crossOrigin = 'anonymous';
+    }
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function wrapCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines = 2
+): number {
+  const words = text.split(/\s+/).filter(Boolean);
+  let line = '';
+  let currentY = y;
+  let linesDrawn = 0;
+
+  for (let i = 0; i < words.length; i += 1) {
+    const testLine = line ? `${line} ${words[i]}` : words[i];
+    if (ctx.measureText(testLine).width > maxWidth && line) {
+      ctx.fillText(line, x, currentY);
+      linesDrawn += 1;
+      if (linesDrawn >= maxLines) return currentY + lineHeight;
+      line = words[i];
+      currentY += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+  if (line) {
+    ctx.fillText(line, x, currentY);
+    currentY += lineHeight;
+  }
+  return currentY;
+}
+
+interface EKartuPayload {
+  nama_pemegang: string;
+  nik: string;
+  program_lpk: string;
+  no_sertifikat_bnsp: string;
+  no_register_bnsp: string;
+  tanggal_terbit: string;
+  berlaku_sampai: string;
+  status_sertifikat: string;
+  url_foto?: string | null;
+  jenis_data?: string | null;
+}
+
+async function generateEKartuWithQR(
+  payload: EKartuPayload
+): Promise<{ dataUrl: string; blob: Blob; qrDataUrl: string }> {
+  const verificationUrl = buildVerificationUrl(payload.nik || '-', payload.jenis_data);
+  const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
+    width: 240,
+    margin: 1,
+    color: {
+      dark: '#111827',
+      light: '#FFFFFF',
+    },
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 860;
+  canvas.height = 540;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Canvas context tidak tersedia.');
+  }
+
+  const renderCard = async (includeRemotePhoto: boolean) => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Card background gradient
+    drawRoundedRectPath(ctx, 0, 0, 860, 540, 28);
+    ctx.save();
+    ctx.clip();
+
+    const bgGrad = ctx.createLinearGradient(0, 0, 860, 540);
+    bgGrad.addColorStop(0, '#1B2029');
+    bgGrad.addColorStop(0.55, '#272C37');
+    bgGrad.addColorStop(1, '#141820');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 860, 540);
+
+    // Subtle diagonal watermark
+    ctx.save();
+    ctx.translate(430, 270);
+    ctx.rotate(-0.24);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.045)';
+    ctx.font = '800 22px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    for (let wy = -320; wy <= 320; wy += 78) {
+      ctx.fillText('HAK COPYRIGHT APIK   •   HAK COPYRIGHT APIK   •   HAK COPYRIGHT APIK', 0, wy);
+    }
+    ctx.restore();
+
+    // Top Maroon Header Strip
+    const headerGrad = ctx.createLinearGradient(0, 0, 860, 0);
+    headerGrad.addColorStop(0, '#710609');
+    headerGrad.addColorStop(0.5, '#9A0E13');
+    headerGrad.addColorStop(1, '#670508');
+    ctx.fillStyle = headerGrad;
+    ctx.fillRect(0, 0, 860, 96);
+
+    // Gold accent stripe under header
+    ctx.fillStyle = '#EAB308';
+    ctx.fillRect(0, 96, 860, 5);
+
+    // Header badge & title
+    ctx.fillStyle = '#FACC15';
+    ctx.font = '800 22px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('E-KARTU KOMPETENSI BNSP', 36, 46);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.font = '700 14px system-ui, -apple-system, sans-serif';
+    ctx.fillText('ASOSIASI PENGEMBANGAN INDONESIA KOMPETEN (APIK)', 36, 74);
+
+    // Right "RESMI" pill
+    drawRoundedRectPath(ctx, 718, 30, 106, 36, 18);
+    ctx.fillStyle = '#FACC15';
+    ctx.fill();
+    ctx.fillStyle = '#5E0507';
+    ctx.font = '900 14px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('RESMI', 771, 53);
+    ctx.textAlign = 'left';
+
+    // Photo frame (left)
+    const photoX = 36;
+    const photoY = 132;
+    const photoW = 162;
+    const photoH = 204;
+
+    drawRoundedRectPath(ctx, photoX, photoY, photoW, photoH, 14);
+    ctx.fillStyle = '#0F172A';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#EAB308';
+    ctx.stroke();
+
+    const photoImg = includeRemotePhoto ? await loadImageSafe(payload.url_foto) : null;
+    if (photoImg) {
+      ctx.save();
+      drawRoundedRectPath(ctx, photoX + 4, photoY + 4, photoW - 8, photoH - 8, 10);
+      ctx.clip();
+      const imgAspect = photoImg.width / photoImg.height;
+      const boxAspect = (photoW - 8) / (photoH - 8);
+      let drawW = photoW - 8;
+      let drawH = photoH - 8;
+      let offsetX = photoX + 4;
+      let offsetY = photoY + 4;
+      if (imgAspect > boxAspect) {
+        drawW = drawH * imgAspect;
+        offsetX -= (drawW - (photoW - 8)) / 2;
+      } else {
+        drawH = drawW / imgAspect;
+        offsetY -= (drawH - (photoH - 8)) / 2;
+      }
+      ctx.drawImage(photoImg, offsetX, offsetY, drawW, drawH);
+      ctx.restore();
+    } else {
+      ctx.save();
+      drawRoundedRectPath(ctx, photoX + 4, photoY + 4, photoW - 8, photoH - 8, 10);
+      ctx.clip();
+      ctx.fillStyle = '#DBEAFE';
+      ctx.fillRect(photoX + 4, photoY + 4, photoW - 8, photoH - 8);
+      ctx.fillStyle = '#1E3A8A';
+      ctx.beginPath();
+      ctx.arc(photoX + photoW / 2, photoY + 86, 32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1D4ED8';
+      ctx.beginPath();
+      ctx.arc(photoX + photoW / 2, photoY + 196, 62, Math.PI, 0);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Status pill under photo
+    const isAktif = (payload.status_sertifikat || 'VALID AKTIF').toUpperCase() === 'VALID AKTIF';
+    drawRoundedRectPath(ctx, photoX, photoY + photoH + 16, photoW, 38, 10);
+    ctx.fillStyle = isAktif ? 'rgba(34, 197, 94, 0.18)' : 'rgba(244, 63, 94, 0.2)';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = isAktif ? '#4ADE80' : '#FB7185';
+    ctx.stroke();
+
+    ctx.fillStyle = isAktif ? '#4ADE80' : '#FDA4AF';
+    ctx.font = '800 14px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText((payload.status_sertifikat || 'VALID AKTIF').toUpperCase(), photoX + photoW / 2, photoY + photoH + 40);
+    ctx.textAlign = 'left';
+
+    // Center Details
+    const detailX = 226;
+    const detailMaxW = 412;
+
+    ctx.fillStyle = '#FACC15';
+    ctx.font = '800 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('NAMA PEMEGANG', detailX, 146);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '800 24px system-ui, -apple-system, sans-serif';
+    let nextY = wrapCanvasText(
+      ctx,
+      (payload.nama_pemegang || '-').toUpperCase(),
+      detailX,
+      176,
+      detailMaxW,
+      28,
+      2
+    );
+
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px system-ui, -apple-system, sans-serif';
+    ctx.fillText('NIK', detailX, nextY + 6);
+    ctx.fillStyle = '#E2E8F0';
+    ctx.font = '700 16px monospace';
+    ctx.fillText(payload.nik || '-', detailX, nextY + 26);
+
+    ctx.fillStyle = '#FACC15';
+    ctx.font = '800 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('PROGRAM LPK / SKEMA', detailX, nextY + 58);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '700 18px system-ui, -apple-system, sans-serif';
+    const afterProgramY = wrapCanvasText(
+      ctx,
+      (payload.program_lpk || '-').toUpperCase(),
+      detailX,
+      nextY + 84,
+      detailMaxW,
+      22,
+      2
+    );
+
+    const gridY = Math.max(afterProgramY + 12, 344);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px system-ui, -apple-system, sans-serif';
+    ctx.fillText('NO. SERTIFIKAT BNSP', detailX, gridY);
+    ctx.fillText('NO. REGISTER BNSP', detailX + 215, gridY);
+
+    ctx.fillStyle = '#F8FAFC';
+    ctx.font = '700 15px monospace';
+    ctx.fillText(payload.no_sertifikat_bnsp || '-', detailX, gridY + 22);
+    ctx.fillText(payload.no_register_bnsp || '-', detailX + 215, gridY + 22);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '700 11px system-ui, -apple-system, sans-serif';
+    ctx.fillText('TANGGAL TERBIT', detailX, gridY + 54);
+    ctx.fillText('BERLAKU SAMPAI', detailX + 215, gridY + 54);
+
+    ctx.fillStyle = '#F8FAFC';
+    ctx.font = '700 15px system-ui, -apple-system, sans-serif';
+    ctx.fillText(formatTanggalIndonesia(payload.tanggal_terbit), detailX, gridY + 76);
+    ctx.fillText(formatTanggalIndonesia(payload.berlaku_sampai), detailX + 215, gridY + 76);
+
+    // Right QR Code Card Box
+    const qrBoxX = 656;
+    const qrBoxY = 178;
+    const qrBoxW = 168;
+    const qrBoxH = 212;
+
+    drawRoundedRectPath(ctx, qrBoxX, qrBoxY, qrBoxW, qrBoxH, 16);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#EAB308';
+    ctx.stroke();
+
+    const qrImg = await loadImageSafe(qrDataUrl);
+    if (qrImg) {
+      ctx.drawImage(qrImg, qrBoxX + 12, qrBoxY + 12, 144, 144);
+    }
+
+    ctx.fillStyle = '#7D0609';
+    ctx.font = '900 11px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('SCAN QR VERIFIKASI', qrBoxX + qrBoxW / 2, qrBoxY + 177);
+    ctx.fillStyle = '#4B5563';
+    ctx.font = '700 10px monospace';
+    ctx.fillText(payload.no_register_bnsp || 'LIVE DB', qrBoxX + qrBoxW / 2, qrBoxY + 196);
+    ctx.textAlign = 'left';
+
+    // Bottom Strip
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(0, 488, 860, 52);
+    ctx.fillStyle = 'rgba(255,255,255,0.72)';
+    ctx.font = '600 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('Terverifikasi melalui Portal Resmi APIK Edu Indonesia • Data Terhubung Real-Time', 36, 519);
+
+    ctx.restore();
+
+    // Outer gold border
+    drawRoundedRectPath(ctx, 1.5, 1.5, 857, 537, 27);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(234, 179, 8, 0.75)';
+    ctx.stroke();
+  };
+
+  await renderCard(true);
+
+  let dataUrl: string;
+  try {
+    dataUrl = canvas.toDataURL('image/png');
+  } catch {
+    // Fallback if remote image server blocks CORS canvas export
+    await renderCard(false);
+    dataUrl = canvas.toDataURL('image/png');
+  }
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((b) => {
+      if (b) resolve(b);
+      else reject(new Error('Gagal membuat file gambar E-Kartu PNG.'));
+    }, 'image/png');
+  });
+
+  return { dataUrl, blob, qrDataUrl };
+}
 
 interface HalamanSetelahNov2022Props {
   onBack?: () => void;
   onHome?: () => void;
-  onVerifikasi?: (judul: string) => void;
+  onVerifikasi?: (judul: string, jenisData?: string) => void;
   onAdminLoginSuccess?: () => void;
 }
 
@@ -368,8 +821,12 @@ export function HalamanSetelahNov2022({
                               type="button"
                               onClick={() => {
                                 if (!onVerifikasi) return;
+                                const jenisDataKey = `${block.id}::${scheme.title}`;
                                 if (scheme.title === 'Operator Scaffolding') {
-                                  onVerifikasi('Pemegang Sertifikat Operasi Scaffolding LSP PEM INDONESIA');
+                                  onVerifikasi(
+                                    'Pemegang Sertifikat Operasi Scaffolding LSP PEM INDONESIA',
+                                    jenisDataKey
+                                  );
                                   return;
                                 }
                                 const lembagaLabel =
@@ -378,7 +835,10 @@ export function HalamanSetelahNov2022({
                                     : block.id === 'geomigas'
                                       ? 'PUSAT PENDIDIKAN GEOMIGAS'
                                       : 'LSP K3';
-                                onVerifikasi(`Pemegang Sertifikat ${scheme.title} ${lembagaLabel}`);
+                                onVerifikasi(
+                                  `Pemegang Sertifikat ${scheme.title} ${lembagaLabel}`,
+                                  jenisDataKey
+                                );
                               }}
                               className="mt-3.5 w-full rounded-[12px] bg-gradient-to-b from-[#A30E12] to-[#7D0609] py-2.5 px-4 text-center text-white text-[12.5px] font-extrabold tracking-[0.06em] uppercase shadow-[0_3px_8px_rgba(125,6,9,0.22)] cursor-pointer active:scale-[0.98] transition-transform"
                             >
@@ -787,56 +1247,24 @@ export function HalamanSebelumNov2022({ onBack, onHome }: HalamanSetelahNov2022P
 
 interface HalamanVerifikasiProps {
   judul: string;
+  jenisData?: string;
+  initialNik?: string;
   onBack: () => void;
 }
 
-export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
-  const [nik, setNik] = useState('');
-  const [tampilkanHasil, setTampilkanHasil] = useState(false);
-
-  const extractProgramName = (text: string) => {
-    return text
-      .replace(/^Pemegang Sertifikat\s+/i, '')
-      .replace(/\s+(LSP PEM INDONESIA|PUSAT PENDIDIKAN GEOMIGAS|LSP K3)$/i, '')
-      .toUpperCase();
-  };
-
-  const getDummyData = (judulText: string) => {
-    const lower = judulText.toLowerCase();
-    if (lower.includes('scaffolding')) {
-      return {
-        nama: 'BUDI SANTOSO',
-        program: lower.includes('pengawas') ? 'PENGAWAS SCAFFOLDING' : 'OPERATOR SCAFFOLDING',
-        noSertifikat: '78429.8113.0006812',
-        noRegister: 'F.2023.0006871',
-        tanggalTerbit: '25 September 2023',
-        berlakuSampai: '25 September 2026',
-        status: 'VALID AKTIF',
-      };
-    }
-    if (lower.includes('k3')) {
-      return {
-        nama: 'ANI WIJAYA',
-        program: extractProgramName(judulText),
-        noSertifikat: '78429.8113.0007429',
-        noRegister: 'F.2024.0008135',
-        tanggalTerbit: '14 Maret 2024',
-        berlakuSampai: '14 Maret 2027',
-        status: 'VALID AKTIF',
-      };
-    }
-    return {
-      nama: 'AHMAD FAUZI',
-      program: extractProgramName(judulText),
-      noSertifikat: '78429.8113.0009104',
-      noRegister: 'F.2024.0009420',
-      tanggalTerbit: '10 Juni 2024',
-      berlakuSampai: '10 Juni 2027',
-      status: 'VALID AKTIF',
-    };
-  };
-
-  const dummyData = getDummyData(judul);
+export function HalamanVerifikasi({
+  judul,
+  jenisData,
+  initialNik = '',
+  onBack,
+}: HalamanVerifikasiProps) {
+  const [nik, setNik] = useState(initialNik);
+  const [loading, setLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [hasilData, setHasilData] = useState<PemegangSertifikatRow | null>(null);
+  const [generatedEKartuUrl, setGeneratedEKartuUrl] = useState<string>('');
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
   const formatJudulLines = (text: string) => {
     const match = text.match(/^(Pemegang Sertifikat)\s+(.+?)\s+(LSP PEM INDONESIA|PUSAT PENDIDIKAN GEOMIGAS|LSP K3)$/i);
@@ -854,15 +1282,134 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
     return text;
   };
 
+  const performLookup = useCallback(
+    async (rawNik: string) => {
+      const cleanNik = rawNik.trim();
+      if (!cleanNik) {
+        setErrorMsg('Silakan ketik NIK terlebih dahulu sebelum menekan CARI.');
+        setHasilData(null);
+        setHasSearched(false);
+        return;
+      }
+
+      setLoading(true);
+      setErrorMsg(null);
+      setHasSearched(true);
+      setHasilData(null);
+      setGeneratedEKartuUrl('');
+      setQrCodeUrl('');
+
+      try {
+        const { data, error } = await supabase
+          .from('data_pemegang')
+          .select('*')
+          .eq('nik', cleanNik)
+          .order('id', { ascending: false });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        const rows = (data as PemegangSertifikatRow[] | null) ?? [];
+        if (rows.length === 0) {
+          setHasilData(null);
+          return;
+        }
+
+        // Prioritize exact jenis_data match, then title/program match, then latest NIK record
+        const schemeTitle = jenisData?.split('::')[1]?.toLowerCase() ?? '';
+        const matchedRow =
+          (jenisData ? rows.find((r) => r.jenis_data === jenisData) : undefined) ||
+          (schemeTitle
+            ? rows.find(
+                (r) =>
+                  r.jenis_data?.toLowerCase().includes(schemeTitle) ||
+                  r.program_lpk?.toLowerCase().includes(schemeTitle)
+              )
+            : undefined) ||
+          rows[0];
+
+        setHasilData(matchedRow);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Gagal terhubung ke database Supabase.';
+        setErrorMsg(`Terjadi kesalahan saat mencari data: ${message}`);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [jenisData]
+  );
+
+  useEffect(() => {
+    if (initialNik.trim()) {
+      setNik(initialNik);
+      void performLookup(initialNik);
+    }
+  }, [initialNik, performLookup]);
+
+  useEffect(() => {
+    let active = true;
+    if (!hasilData) {
+      setGeneratedEKartuUrl('');
+      setQrCodeUrl('');
+      return;
+    }
+
+    const buildAssets = async () => {
+      try {
+        const verifyUrl = buildVerificationUrl(
+          hasilData.nik || nik,
+          hasilData.jenis_data || jenisData
+        );
+        const qr = await QRCode.toDataURL(verifyUrl, {
+          width: 220,
+          margin: 1,
+          color: { dark: '#111827', light: '#FFFFFF' },
+        });
+        if (active) setQrCodeUrl(qr);
+
+        if (!hasilData.url_e_kartu) {
+          const generated = await generateEKartuWithQR({
+            nama_pemegang: hasilData.nama_pemegang || '-',
+            nik: hasilData.nik || nik,
+            program_lpk: hasilData.program_lpk || '-',
+            no_sertifikat_bnsp: hasilData.no_sertifikat_bnsp || '-',
+            no_register_bnsp: hasilData.no_register_bnsp || '-',
+            tanggal_terbit: hasilData.tanggal_terbit || '-',
+            berlaku_sampai: hasilData.berlaku_sampai || '-',
+            status_sertifikat: hasilData.status_sertifikat || 'VALID AKTIF',
+            url_foto: hasilData.url_foto,
+            jenis_data: hasilData.jenis_data || jenisData,
+          });
+          if (active) setGeneratedEKartuUrl(generated.dataUrl);
+        }
+      } catch {
+        // Keep UI graceful even if canvas generation fails
+      }
+    };
+
+    void buildAssets();
+    return () => {
+      active = false;
+    };
+  }, [hasilData, jenisData, nik]);
+
   const handleCari = (e: React.FormEvent) => {
     e.preventDefault();
-    setTampilkanHasil(true);
+    void performLookup(nik);
   };
 
   const handleClear = () => {
     setNik('');
-    setTampilkanHasil(false);
+    setHasSearched(false);
+    setErrorMsg(null);
+    setHasilData(null);
+    setGeneratedEKartuUrl('');
+    setQrCodeUrl('');
   };
+
+  const displayedEKartu = hasilData?.url_e_kartu || generatedEKartuUrl;
+  const isStatusValid = (hasilData?.status_sertifikat || 'VALID AKTIF').toUpperCase() === 'VALID AKTIF';
 
   return (
     <div className="min-h-screen w-full bg-[#121215] flex justify-center font-sans antialiased">
@@ -905,15 +1452,17 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
               inputMode="numeric"
               value={nik}
               onChange={(e) => setNik(e.target.value)}
-              className="w-full rounded-[10px] bg-white border-[1.5px] border-[#8B2326] px-3.5 py-2.5 text-[14px] text-[#1F2937] focus:outline-none focus:border-[#7D0609]"
+              placeholder="Masukkan NIK pemegang sertifikat"
+              className="w-full rounded-[10px] bg-white border-[1.5px] border-[#8B2326] px-3.5 py-2.5 text-[14px] text-[#1F2937] placeholder:text-[#9CA3AF] focus:outline-none focus:border-[#7D0609]"
             />
 
             <div className="mt-3 flex flex-col items-start gap-2.5">
               <button
                 type="submit"
-                className="w-[116px] rounded-[10px] bg-gradient-to-b from-[#DC2626] to-[#B91C1C] border-b-[3px] border-b-[#7F1D1D] py-2.5 px-5 text-white text-[12.5px] font-extrabold tracking-[0.05em] uppercase shadow-sm cursor-pointer active:translate-y-[1px] transition-all"
+                disabled={loading}
+                className="w-[116px] rounded-[10px] bg-gradient-to-b from-[#DC2626] to-[#B91C1C] border-b-[3px] border-b-[#7F1D1D] py-2.5 px-5 text-white text-[12.5px] font-extrabold tracking-[0.05em] uppercase shadow-sm cursor-pointer active:translate-y-[1px] transition-all disabled:opacity-60"
               >
-                CARI
+                {loading ? 'MENCARI...' : 'CARI'}
               </button>
               <button
                 type="button"
@@ -925,8 +1474,25 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
             </div>
           </form>
 
-          {/* Dummy Data Result Section */}
-          {tampilkanHasil && (
+          {errorMsg && (
+            <div className="mt-4 rounded-[12px] bg-[#FEF2F2] border border-[#FECACA] px-3.5 py-3 text-[12.5px] text-[#991B1B] font-medium">
+              {errorMsg}
+            </div>
+          )}
+
+          {hasSearched && !loading && !errorMsg && !hasilData && (
+            <div className="mt-5 rounded-[14px] bg-[#FFFBEB] border border-[#FDE68A] px-4 py-4 text-center">
+              <div className="text-[12.5px] font-extrabold text-[#92400E] uppercase tracking-[0.03em]">
+                DATA TIDAK DITEMUKAN
+              </div>
+              <p className="mt-1 text-[12.5px] text-[#78350F] leading-relaxed">
+                Data pemegang sertifikat dengan NIK <strong className="font-bold">{nik.trim()}</strong> belum terdaftar di sistem database.
+              </p>
+            </div>
+          )}
+
+          {/* Live Supabase Data Result Section */}
+          {hasilData && (
             <div className="mt-7 text-left">
               <h2 className="text-[12px] font-extrabold text-[#7D0609] tracking-[0.04em] uppercase pb-2.5 border-b border-dashed border-[#E5E7EB]">
                 DATA PEMEGANG SERTIFIKAT
@@ -937,11 +1503,18 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                   FOTO PEMEGANG
                 </div>
                 <div className="w-[92px] h-[116px] rounded-[10px] border-[1.5px] border-[#EAB308] bg-white p-1 shadow-xs overflow-hidden">
-                  <div className="w-full h-full rounded-[6px] bg-gradient-to-b from-[#DBEAFE] to-[#BFDBFE] flex flex-col items-center justify-end overflow-hidden relative">
-                    {/* Minimalist Portrait Placeholder */}
-                    <div className="w-9 h-9 rounded-full bg-[#1E3A8A]/80 mb-1.5" />
-                    <div className="w-16 h-10 rounded-t-full bg-[#1D4ED8]" />
-                  </div>
+                  {hasilData.url_foto ? (
+                    <img
+                      src={hasilData.url_foto}
+                      alt={hasilData.nama_pemegang || 'Foto Pemegang'}
+                      className="w-full h-full rounded-[6px] object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full rounded-[6px] bg-gradient-to-b from-[#DBEAFE] to-[#BFDBFE] flex flex-col items-center justify-end overflow-hidden relative">
+                      <div className="w-9 h-9 rounded-full bg-[#1E3A8A]/80 mb-1.5" />
+                      <div className="w-16 h-10 rounded-t-full bg-[#1D4ED8]" />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -951,7 +1524,7 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                     NAMA PEMEGANG
                   </div>
                   <div className="mt-2 text-[14.5px] text-[#1F2937] uppercase">
-                    {dummyData.nama}
+                    {hasilData.nama_pemegang || '-'}
                   </div>
                 </div>
 
@@ -960,7 +1533,7 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                     PROGRAM LPK
                   </div>
                   <div className="mt-2 text-[14.5px] text-[#1F2937] uppercase">
-                    {dummyData.program}
+                    {hasilData.program_lpk || '-'}
                   </div>
                 </div>
 
@@ -969,7 +1542,7 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                     NO SERTIFIKAT BNSP
                   </div>
                   <div className="mt-2 text-[14.5px] text-[#1F2937]">
-                    {dummyData.noSertifikat}
+                    {hasilData.no_sertifikat_bnsp || '-'}
                   </div>
                 </div>
 
@@ -978,7 +1551,7 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                     NO REGISTER BNSP
                   </div>
                   <div className="mt-2 text-[14.5px] text-[#1F2937]">
-                    {dummyData.noRegister}
+                    {hasilData.no_register_bnsp || '-'}
                   </div>
                 </div>
 
@@ -987,7 +1560,7 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                     TANGGAL TERBIT
                   </div>
                   <div className="mt-2 text-[14.5px] text-[#1F2937]">
-                    {dummyData.tanggalTerbit}
+                    {formatTanggalIndonesia(hasilData.tanggal_terbit)}
                   </div>
                 </div>
 
@@ -996,7 +1569,7 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                     BERLAKU SAMPAI
                   </div>
                   <div className="mt-2 text-[14.5px] text-[#1F2937]">
-                    {dummyData.berlakuSampai}
+                    {formatTanggalIndonesia(hasilData.berlaku_sampai)}
                   </div>
                 </div>
 
@@ -1004,8 +1577,12 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                   <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase">
                     STATUS SERTIFIKAT
                   </div>
-                  <div className="mt-2 text-[13px] font-extrabold text-[#7D0609] uppercase tracking-[0.02em]">
-                    {dummyData.status}
+                  <div
+                    className={`mt-2 text-[13px] font-extrabold uppercase tracking-[0.02em] ${
+                      isStatusValid ? 'text-[#15803D]' : 'text-[#7D0609]'
+                    }`}
+                  >
+                    {hasilData.status_sertifikat || 'VALID AKTIF'}
                   </div>
                 </div>
 
@@ -1013,42 +1590,78 @@ export function HalamanVerifikasi({ judul, onBack }: HalamanVerifikasiProps) {
                   <div className="text-[11.5px] font-extrabold text-[#7D0609] tracking-[0.03em] uppercase mb-2.5">
                     E-KARTU LSP BNSP
                   </div>
-                  <div className="w-full h-[180px] rounded-[12px] bg-[#2D3139] relative overflow-hidden flex flex-col justify-between p-4 shadow-inner">
-                    <div className="absolute inset-0 flex flex-col justify-around opacity-[0.06] -rotate-12 scale-125 pointer-events-none select-none">
-                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
-                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+
+                  {displayedEKartu ? (
+                    <div className="space-y-2.5">
+                      <div className="rounded-[12px] overflow-hidden border-[1.5px] border-[#EAB308] bg-[#1F242D] shadow-sm">
+                        <img
+                          src={displayedEKartu}
+                          alt={`E-Kartu ${hasilData.nama_pemegang || ''}`}
+                          className="w-full h-auto block"
+                        />
                       </div>
-                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
-                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+                      <a
+                        href={displayedEKartu}
+                        download={`E-Kartu-${(hasilData.nama_pemegang || hasilData.nik || 'BNSP').replace(/\s+/g, '_')}.png`}
+                        className="w-full rounded-[10px] bg-gradient-to-b from-[#FCE068] to-[#E5AC1A] border border-[#D49810] py-2.5 px-4 text-center text-[#3D0005] text-[11.5px] font-extrabold tracking-[0.04em] uppercase flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition-transform"
+                      >
+                        <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        <span>DOWNLOAD E-KARTU PNG</span>
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="w-full h-[180px] rounded-[12px] bg-[#2D3139] relative overflow-hidden flex flex-col justify-between p-4 shadow-inner">
+                      <div className="relative z-10 flex items-center justify-between">
+                        <span className="text-[10px] font-extrabold text-[#FACC15] tracking-[0.08em] uppercase">
+                          E-KARTU KOMPETENSI BNSP
+                        </span>
+                        <span className="text-[9px] font-bold text-white/70 uppercase">
+                          RESMI
+                        </span>
                       </div>
-                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
-                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+                      <div className="relative z-10">
+                        <div className="text-[13px] font-extrabold text-white uppercase">
+                          {hasilData.nama_pemegang || '-'}
+                        </div>
+                        <div className="text-[10.5px] text-white/75 uppercase mt-0.5">
+                          {hasilData.program_lpk || '-'}
+                        </div>
                       </div>
-                      <div className="text-white text-[13px] font-extrabold tracking-[0.2em] whitespace-nowrap">
-                        HAK COPYRIGHT APIK  HAK COPYRIGHT APIK
+                      <div className="relative z-10 flex items-center justify-between text-[10px] text-white/70">
+                        <span>{hasilData.no_register_bnsp || '-'}</span>
+                        <span className="text-[#4ADE80] font-bold">
+                          {hasilData.status_sertifikat || 'VALID AKTIF'}
+                        </span>
                       </div>
                     </div>
-                    <div className="relative z-10 flex items-center justify-between">
-                      <span className="text-[10px] font-extrabold text-[#FACC15] tracking-[0.08em] uppercase">
-                        E-KARTU KOMPETENSI BNSP
-                      </span>
-                      <span className="text-[9px] font-bold text-white/70 uppercase">
-                        RESMI
-                      </span>
-                    </div>
-                    <div className="relative z-10">
-                      <div className="text-[13px] font-extrabold text-white uppercase">
-                        {dummyData.nama}
+                  )}
+
+                  {/* Scannable QR Verification Box */}
+                  {qrCodeUrl && (
+                    <div className="mt-3 rounded-[12px] border border-[#F3E6CA] bg-[#FFFDF8] p-3 flex items-center gap-3">
+                      <img
+                        src={qrCodeUrl}
+                        alt="QR Code Verifikasi"
+                        className="w-[74px] h-[74px] rounded-[8px] border border-[#EAB308] bg-white p-1 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-[10.5px] font-extrabold text-[#7D0609] uppercase tracking-[0.04em]">
+                          QR CODE VERIFIKASI OTENTIK
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-[#57534E] leading-snug">
+                          Pindai QR code ini untuk verifikasi langsung data sertifikat NIK{' '}
+                          <span className="font-mono font-bold text-[#1F2937]">
+                            {hasilData.nik}
+                          </span>
+                          .
+                        </p>
                       </div>
-                      <div className="text-[10.5px] text-white/75 uppercase mt-0.5">
-                        {dummyData.program}
-                      </div>
                     </div>
-                    <div className="relative z-10 flex items-center justify-between text-[10px] text-white/70">
-                      <span>{dummyData.noRegister}</span>
-                      <span className="text-[#4ADE80] font-bold">{dummyData.status}</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1199,20 +1812,6 @@ interface AdminProgramItem {
   title: string;
 }
 
-interface AdminPemegangRecord {
-  id: string;
-  nama: string;
-  nik: string;
-  programLpk: string;
-  noSertifikatBnsp: string;
-  noRegisterBnsp: string;
-  tanggalTerbit: string;
-  berlakuSampai: string;
-  status: string;
-  foto: string;
-  eKartu: string;
-}
-
 const ADMIN_PROGRAM_GROUPS: { lembaga: string; items: AdminProgramItem[] }[] = [
   {
     lembaga: 'PUSAT PENDIDIKAN GEOMIGAS',
@@ -1267,59 +1866,23 @@ const ADMIN_PROGRAM_GROUPS: { lembaga: string; items: AdminProgramItem[] }[] = [
   },
 ];
 
-function createInitialAdminDummyData(): Record<string, AdminPemegangRecord[]> {
-  const sampleNames = [
-    ['BUDI SANTOSO', 'RENDI PRATAMA'],
-    ['ANI WIJAYA', 'DEWI LESTARI'],
-    ['HENDRA KUSUMA', 'FAJAR NUGROHO'],
-    ['AGUS SETIAWAN', 'YUSUF RAMADHAN'],
-  ];
-  const data: Record<string, AdminPemegangRecord[]> = {};
-  let index = 0;
-
+function resolveProgramKeyFromJenis(jenisData?: string | null): string | null {
+  if (!jenisData) return null;
+  const trimmed = jenisData.trim();
   for (const group of ADMIN_PROGRAM_GROUPS) {
     for (const item of group.items) {
-      const lower = item.title.toLowerCase();
-      const pair = lower.includes('scaffolding')
-        ? ['BUDI SANTOSO', 'MUCHT.']
-        : lower.includes('k3')
-          ? ['ANI WIJAYA', 'SITI RAHMA']
-          : sampleNames[index % sampleNames.length];
-      const baseNum = 731103300100 + index * 17;
-      const certSuffix = String(6812 + index * 13).padStart(7, '0');
-      const regSuffix = String(6871 + index * 11).padStart(7, '0');
-      data[item.key] = [
-        {
-          id: `${item.key}-1`,
-          nama: pair[0],
-          nik: `${baseNum}`,
-          programLpk: item.title.toUpperCase(),
-          noSertifikatBnsp: `78429.8113.${certSuffix}`,
-          noRegisterBnsp: `F.2023.${regSuffix}`,
-          tanggalTerbit: '2023-09-25',
-          berlakuSampai: '2026-09-25',
-          status: 'VALID AKTIF',
-          foto: '',
-          eKartu: '',
-        },
-        {
-          id: `${item.key}-2`,
-          nama: pair[1],
-          nik: `${baseNum + 5}`,
-          programLpk: item.title.toUpperCase(),
-          noSertifikatBnsp: `78429.8113.${String(Number(certSuffix) + 1).padStart(7, '0')}`,
-          noRegisterBnsp: `F.2023.${String(Number(regSuffix) + 1).padStart(7, '0')}`,
-          tanggalTerbit: '2024-03-14',
-          berlakuSampai: '2027-03-14',
-          status: 'VALID AKTIF',
-          foto: '',
-          eKartu: '',
-        },
-      ];
-      index += 1;
+      if (item.key === trimmed) return item.key;
     }
   }
-  return data;
+  const lower = trimmed.toLowerCase();
+  for (const group of ADMIN_PROGRAM_GROUPS) {
+    for (const item of group.items) {
+      if (item.title.toLowerCase() === lower || item.key.toLowerCase() === lower) {
+        return item.key;
+      }
+    }
+  }
+  return null;
 }
 
 interface HalamanAdminDashboardProps {
@@ -1328,26 +1891,75 @@ interface HalamanAdminDashboardProps {
 }
 
 export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashboardProps) {
-  const [dataByProgram, setDataByProgram] = useState<Record<string, AdminPemegangRecord[]>>(
-    () => createInitialAdminDummyData()
-  );
+  const [records, setRecords] = useState<PemegangSertifikatRow[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [generatingCard, setGeneratingCard] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | number | null>(null);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [adminNotice, setAdminNotice] = useState<string | null>(null);
+
   const [selectedProgram, setSelectedProgram] = useState<AdminProgramItem | null>(null);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | number | null>(null);
+
   const [formFoto, setFormFoto] = useState('');
+  const [formFotoFile, setFormFotoFile] = useState<File | null>(null);
   const [formNama, setFormNama] = useState('');
   const [formNik, setFormNik] = useState('');
   const [formProgramLpk, setFormProgramLpk] = useState('');
   const [formNoSertifikat, setFormNoSertifikat] = useState('');
   const [formNoRegister, setFormNoRegister] = useState('');
-  const [formTanggalTerbit, setFormTanggalTerbit] = useState('2023-09-25');
-  const [formBerlakuSampai, setFormBerlakuSampai] = useState('2026-09-25');
+  const [formTanggalTerbit, setFormTanggalTerbit] = useState('2024-01-15');
+  const [formBerlakuSampai, setFormBerlakuSampai] = useState('2027-01-15');
   const [formStatus, setFormStatus] = useState('VALID AKTIF');
   const [formEKartu, setFormEKartu] = useState('');
+  const [formEKartuFile, setFormEKartuFile] = useState<File | Blob | null>(null);
+
+  const fetchAllRecords = useCallback(async () => {
+    setLoadingData(true);
+    setAdminError(null);
+    try {
+      const { data, error } = await supabase
+        .from('data_pemegang')
+        .select('*')
+        .order('id', { ascending: false });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      setRecords((data as PemegangSertifikatRow[] | null) ?? []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Gagal memuat data dari Supabase.';
+      setAdminError(`Gagal memuat data Supabase: ${message}`);
+    } finally {
+      setLoadingData(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchAllRecords();
+  }, [fetchAllRecords]);
+
+  const dataByProgram: Record<string, PemegangSertifikatRow[]> = {};
+  for (const row of records) {
+    const resolvedKey =
+      resolveProgramKeyFromJenis(row.jenis_data) ||
+      resolveProgramKeyFromJenis(row.program_lpk) ||
+      row.jenis_data ||
+      'other';
+    if (!dataByProgram[resolvedKey]) {
+      dataByProgram[resolvedKey] = [];
+    }
+    dataByProgram[resolvedKey].push(row);
+  }
 
   const openTambahModal = () => {
     setEditingId(null);
     setFormFoto('');
+    setFormFotoFile(null);
     setFormNama('');
     setFormNik('');
     setFormProgramLpk(selectedProgram ? selectedProgram.title.toUpperCase() : '');
@@ -1357,27 +1969,33 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     setFormBerlakuSampai('2027-01-15');
     setFormStatus('VALID AKTIF');
     setFormEKartu('');
+    setFormEKartuFile(null);
+    setAdminError(null);
     setFormOpen(true);
   };
 
-  const openEditModal = (record: AdminPemegangRecord) => {
+  const openEditModal = (record: PemegangSertifikatRow) => {
     setEditingId(record.id);
-    setFormFoto(record.foto);
-    setFormNama(record.nama);
-    setFormNik(record.nik);
-    setFormProgramLpk(record.programLpk);
-    setFormNoSertifikat(record.noSertifikatBnsp);
-    setFormNoRegister(record.noRegisterBnsp);
-    setFormTanggalTerbit(record.tanggalTerbit);
-    setFormBerlakuSampai(record.berlakuSampai);
-    setFormStatus(record.status);
-    setFormEKartu(record.eKartu);
+    setFormFoto(record.url_foto || '');
+    setFormFotoFile(null);
+    setFormNama(record.nama_pemegang || '');
+    setFormNik(record.nik || '');
+    setFormProgramLpk(record.program_lpk || (selectedProgram ? selectedProgram.title.toUpperCase() : ''));
+    setFormNoSertifikat(record.no_sertifikat_bnsp || '');
+    setFormNoRegister(record.no_register_bnsp || '');
+    setFormTanggalTerbit(record.tanggal_terbit || '2024-01-15');
+    setFormBerlakuSampai(record.berlaku_sampai || '2027-01-15');
+    setFormStatus(record.status_sertifikat || 'VALID AKTIF');
+    setFormEKartu(record.url_e_kartu || '');
+    setFormEKartuFile(null);
+    setAdminError(null);
     setFormOpen(true);
   };
 
   const handleUploadFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFormFotoFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -1390,6 +2008,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
   const handleUploadEKartu = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFormEKartuFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === 'string') {
@@ -1399,69 +2018,154 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     reader.readAsDataURL(file);
   };
 
-  const handleSaveRecord = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGenerateAutoEKartu = async () => {
     if (!selectedProgram) return;
-    const cleanedNama = formNama.trim().toUpperCase() || 'TANPA NAMA';
-    const cleanedNik = formNik.trim() || '000000000000';
-    const cleanedProgram = formProgramLpk.trim().toUpperCase() || selectedProgram.title.toUpperCase();
-    const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
-    const cleanedNoRegister = formNoRegister.trim() || '-';
-    const key = selectedProgram.key;
+    setGeneratingCard(true);
+    setAdminError(null);
+    try {
+      const cleanedNama = formNama.trim().toUpperCase() || 'PEMEGANG SERTIFIKAT';
+      const cleanedNik = formNik.trim() || '0000000000000000';
+      const cleanedProgram = formProgramLpk.trim().toUpperCase() || selectedProgram.title.toUpperCase();
+      const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
+      const cleanedNoRegister = formNoRegister.trim() || '-';
 
-    setDataByProgram((prev) => {
-      const currentList = prev[key] ?? [];
-      if (editingId) {
-        return {
-          ...prev,
-          [key]: currentList.map((row) =>
-            row.id === editingId
-              ? {
-                  ...row,
-                  foto: formFoto,
-                  nama: cleanedNama,
-                  nik: cleanedNik,
-                  programLpk: cleanedProgram,
-                  noSertifikatBnsp: cleanedNoSertifikat,
-                  noRegisterBnsp: cleanedNoRegister,
-                  tanggalTerbit: formTanggalTerbit,
-                  berlakuSampai: formBerlakuSampai,
-                  status: formStatus,
-                  eKartu: formEKartu,
-                }
-              : row
-          ),
-        };
-      }
-      const newRecord: AdminPemegangRecord = {
-        id: `${key}-${Date.now()}`,
-        foto: formFoto,
-        nama: cleanedNama,
+      const generated = await generateEKartuWithQR({
+        nama_pemegang: cleanedNama,
         nik: cleanedNik,
-        programLpk: cleanedProgram,
-        noSertifikatBnsp: cleanedNoSertifikat,
-        noRegisterBnsp: cleanedNoRegister,
-        tanggalTerbit: formTanggalTerbit,
-        berlakuSampai: formBerlakuSampai,
-        status: formStatus,
-        eKartu: formEKartu,
-      };
-      return {
-        ...prev,
-        [key]: [newRecord, ...currentList],
-      };
-    });
+        program_lpk: cleanedProgram,
+        no_sertifikat_bnsp: cleanedNoSertifikat,
+        no_register_bnsp: cleanedNoRegister,
+        tanggal_terbit: formTanggalTerbit,
+        berlaku_sampai: formBerlakuSampai,
+        status_sertifikat: formStatus,
+        url_foto: formFoto,
+        jenis_data: selectedProgram.key,
+      });
 
-    setFormOpen(false);
+      setFormEKartu(generated.dataUrl);
+      setFormEKartuFile(generated.blob);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Gagal generate E-Kartu otomatis.';
+      setAdminError(message);
+    } finally {
+      setGeneratingCard(false);
+    }
   };
 
-  const handleDeleteRecord = (id: string) => {
+  const handleSaveRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedProgram) return;
-    const key = selectedProgram.key;
-    setDataByProgram((prev) => ({
-      ...prev,
-      [key]: (prev[key] ?? []).filter((row) => row.id !== id),
-    }));
+
+    setSaving(true);
+    setAdminError(null);
+    setAdminNotice(null);
+
+    try {
+      const cleanedNama = formNama.trim().toUpperCase() || 'TANPA NAMA';
+      const cleanedNik = formNik.trim() || '000000000000';
+      const cleanedProgram =
+        formProgramLpk.trim().toUpperCase() || selectedProgram.title.toUpperCase();
+      const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
+      const cleanedNoRegister = formNoRegister.trim() || '-';
+
+      // 1. Upload foto to Supabase Storage bucket 'files' if user selected a new file
+      let finalFotoUrl = formFoto.startsWith('http') ? formFoto : '';
+      if (formFotoFile) {
+        finalFotoUrl = await uploadFileToSupabaseBucket(formFotoFile, 'foto', cleanedNik);
+      }
+
+      // 2. Upload manual E-Kartu OR auto-generate E-Kartu + QR if none uploaded
+      let finalEKartuUrl = formEKartu.startsWith('http') ? formEKartu : '';
+      if (formEKartuFile) {
+        finalEKartuUrl = await uploadFileToSupabaseBucket(formEKartuFile, 'ekartu', cleanedNik);
+      } else if (!finalEKartuUrl) {
+        const autoCard = await generateEKartuWithQR({
+          nama_pemegang: cleanedNama,
+          nik: cleanedNik,
+          program_lpk: cleanedProgram,
+          no_sertifikat_bnsp: cleanedNoSertifikat,
+          no_register_bnsp: cleanedNoRegister,
+          tanggal_terbit: formTanggalTerbit,
+          berlaku_sampai: formBerlakuSampai,
+          status_sertifikat: formStatus,
+          url_foto: finalFotoUrl || formFoto,
+          jenis_data: selectedProgram.key,
+        });
+        finalEKartuUrl = await uploadFileToSupabaseBucket(autoCard.blob, 'ekartu', cleanedNik);
+      }
+
+      const payload = {
+        jenis_data: selectedProgram.key,
+        nama_pemegang: cleanedNama,
+        nik: cleanedNik,
+        program_lpk: cleanedProgram,
+        no_sertifikat_bnsp: cleanedNoSertifikat,
+        no_register_bnsp: cleanedNoRegister,
+        tanggal_terbit: formTanggalTerbit,
+        berlaku_sampai: formBerlakuSampai,
+        status_sertifikat: formStatus,
+        url_foto: finalFotoUrl || null,
+        url_e_kartu: finalEKartuUrl || null,
+      };
+
+      if (editingId !== null) {
+        const { data: updatedRow, error } = await supabase
+          .from('data_pemegang')
+          .update(payload)
+          .eq('id', editingId)
+          .select()
+          .single();
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        const saved = updatedRow as PemegangSertifikatRow;
+        setRecords((prev) => prev.map((r) => (r.id === editingId ? saved : r)));
+        setAdminNotice(`Data ${cleanedNama} berhasil diperbarui di Supabase.`);
+      } else {
+        const { data: insertedRow, error } = await supabase
+          .from('data_pemegang')
+          .insert([payload])
+          .select()
+          .single();
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        const saved = insertedRow as PemegangSertifikatRow;
+        setRecords((prev) => [saved, ...prev]);
+        setAdminNotice(`Data ${cleanedNama} & E-Kartu QR berhasil disimpan ke Supabase.`);
+      }
+
+      setFormOpen(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Gagal menyimpan data ke Supabase.';
+      setAdminError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteRecord = async (id: string | number) => {
+    setDeletingId(id);
+    setAdminError(null);
+    setAdminNotice(null);
+    try {
+      const { error } = await supabase.from('data_pemegang').delete().eq('id', id);
+      if (error) {
+        throw new Error(error.message);
+      }
+      setRecords((prev) => prev.filter((row) => row.id !== id));
+      setConfirmDeleteId(null);
+      setAdminNotice('Data pemegang berhasil dihapus dari Supabase.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Gagal menghapus data di Supabase.';
+      setAdminError(message);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const activeRecords = selectedProgram ? dataByProgram[selectedProgram.key] ?? [] : [];
@@ -1476,7 +2180,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
               <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-emerald-400">
-                SUPER ADMIN
+                SUPER ADMIN • SUPABASE LIVE
               </span>
             </div>
             <h1 className="text-[18px] font-black tracking-[0.06em] uppercase text-white leading-tight">
@@ -1502,13 +2206,33 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
           </div>
         </header>
 
-        <main className="flex-1 px-3.5 py-4">
+        <main className="flex-1 px-3.5 py-4 space-y-3.5">
+          {adminError && (
+            <div className="rounded-[12px] bg-rose-950/75 border border-rose-700/70 px-3.5 py-2.5 text-[12px] text-rose-200">
+              {adminError}
+            </div>
+          )}
+
+          {adminNotice && (
+            <div className="rounded-[12px] bg-emerald-950/75 border border-emerald-700/70 px-3.5 py-2.5 text-[12px] text-emerald-200">
+              {adminNotice}
+            </div>
+          )}
+
           {!selectedProgram ? (
             <div className="space-y-5">
-              <div className="rounded-[16px] bg-[#111827] border border-slate-800 p-4">
+              <div className="rounded-[16px] bg-[#111827] border border-slate-800 p-4 flex items-center justify-between gap-3">
                 <p className="text-[12px] text-slate-400 leading-relaxed">
-                  Pilih salah satu jenis sertifikat di bawah untuk mengelola data pemegang sertifikat (Tambah, Edit, Hapus, &amp; Upload Foto).
+                  Pilih jenis sertifikat untuk kelola data pemegang (Supabase + Upload Foto + Auto E-Kartu QR).
                 </p>
+                <button
+                  type="button"
+                  onClick={() => void fetchAllRecords()}
+                  disabled={loadingData}
+                  className="shrink-0 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1.5 text-[10.5px] font-bold uppercase text-amber-400 cursor-pointer disabled:opacity-50"
+                >
+                  {loadingData ? '...' : 'REFRESH'}
+                </button>
               </div>
 
               {ADMIN_PROGRAM_GROUPS.map((group) => (
@@ -1529,7 +2253,11 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                         <button
                           key={item.key}
                           type="button"
-                          onClick={() => setSelectedProgram(item)}
+                          onClick={() => {
+                            setAdminNotice(null);
+                            setAdminError(null);
+                            setSelectedProgram(item);
+                          }}
                           className="w-full rounded-[14px] bg-[#131A26] hover:bg-[#192233] border border-slate-800 px-3.5 py-3 flex items-center justify-between gap-3 text-left cursor-pointer active:scale-[0.99] transition-all"
                         >
                           <div className="min-w-0 flex-1">
@@ -1537,7 +2265,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                               Kelola Data {item.title}
                             </div>
                             <div className="text-[10.5px] text-slate-400 mt-0.5">
-                              {count} data pemegang
+                              {loadingData ? 'Memuat...' : `${count} data pemegang`}
                             </div>
                           </div>
                           <span className="shrink-0 rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.05em] text-emerald-400">
@@ -1554,14 +2282,27 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
             <div className="space-y-4">
               {/* Program Table Header Controls */}
               <div className="rounded-[16px] bg-[#111827] border border-slate-800 p-4 space-y-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedProgram(null)}
-                  className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-amber-400 cursor-pointer"
-                >
-                  <span>←</span>
-                  <span>Semua Jenis Sertifikat</span>
-                </button>
+                <div className="flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmDeleteId(null);
+                      setSelectedProgram(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-[11.5px] font-bold text-amber-400 cursor-pointer"
+                  >
+                    <span>←</span>
+                    <span>Semua Jenis Sertifikat</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void fetchAllRecords()}
+                    disabled={loadingData}
+                    className="text-[10.5px] font-bold uppercase text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {loadingData ? 'MEMUAT...' : 'SYNC'}
+                  </button>
+                </div>
 
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -1582,7 +2323,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                 </div>
               </div>
 
-              {/* Dummy Data Table */}
+              {/* Supabase Live Data Table */}
               <div className="rounded-[16px] border border-slate-800 bg-[#111827] overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse min-w-[680px]">
@@ -1598,20 +2339,26 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/80 text-[12px]">
-                      {activeRecords.length === 0 ? (
+                      {loadingData ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 px-4 text-center text-slate-400">
+                            Memuat data dari Supabase...
+                          </td>
+                        </tr>
+                      ) : activeRecords.length === 0 ? (
                         <tr>
                           <td colSpan={7} className="py-8 px-4 text-center text-slate-500">
-                            Belum ada data. Klik tombol TAMBAH untuk menambahkan data.
+                            Belum ada data di Supabase. Klik tombol + TAMBAH untuk menambahkan data.
                           </td>
                         </tr>
                       ) : (
                         activeRecords.map((row) => (
                           <tr key={row.id} className="hover:bg-slate-800/30">
                             <td className="py-3 px-3 align-middle">
-                              {row.foto ? (
+                              {row.url_foto ? (
                                 <img
-                                  src={row.foto}
-                                  alt={row.nama}
+                                  src={row.url_foto}
+                                  alt={row.nama_pemegang || 'Foto'}
                                   className="w-10 h-12 rounded-[8px] object-cover border border-amber-500/60"
                                 />
                               ) : (
@@ -1622,68 +2369,88 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                             </td>
                             <td className="py-3 px-2.5 align-middle">
                               <div className="font-bold text-white leading-tight">
-                                {row.nama}
+                                {row.nama_pemegang || '-'}
                               </div>
                               <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
-                                {row.nik}
+                                {row.nik || '-'}
                               </div>
                             </td>
                             <td className="py-3 px-2.5 align-middle">
                               <div className="text-[11px] font-bold text-slate-200 leading-tight">
-                                {row.programLpk}
+                                {row.program_lpk || '-'}
                               </div>
                               <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
-                                {row.noSertifikatBnsp}
+                                {row.no_sertifikat_bnsp || '-'}
                               </div>
                               <div className="text-[10px] text-slate-500 font-mono">
-                                {row.noRegisterBnsp}
+                                {row.no_register_bnsp || '-'}
                               </div>
                             </td>
                             <td className="py-3 px-2.5 align-middle text-[10.5px] text-slate-300 font-mono">
-                              <div>Terbit: {row.tanggalTerbit}</div>
-                              <div className="text-slate-400">Exp: {row.berlakuSampai}</div>
+                              <div>Terbit: {row.tanggal_terbit || '-'}</div>
+                              <div className="text-slate-400">Exp: {row.berlaku_sampai || '-'}</div>
                             </td>
                             <td className="py-3 px-2.5 align-middle">
                               <span
                                 className={`inline-block rounded-full px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-[0.04em] ${
-                                  row.status === 'VALID AKTIF'
+                                  (row.status_sertifikat || '').toUpperCase() === 'VALID AKTIF'
                                     ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                                     : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                                 }`}
                               >
-                                {row.status}
+                                {row.status_sertifikat || 'VALID AKTIF'}
                               </span>
                             </td>
                             <td className="py-3 px-2.5 align-middle">
-                              {row.eKartu ? (
+                              {row.url_e_kartu ? (
                                 <img
-                                  src={row.eKartu}
-                                  alt={`E-Kartu ${row.nama}`}
-                                  className="w-14 h-9 rounded-[6px] object-cover border border-amber-500/60"
+                                  src={row.url_e_kartu}
+                                  alt={`E-Kartu ${row.nama_pemegang || ''}`}
+                                  className="w-16 h-10 rounded-[6px] object-cover border border-amber-500/60"
                                 />
                               ) : (
-                                <div className="w-14 h-9 rounded-[6px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[8.5px] font-bold text-slate-400">
+                                <div className="w-16 h-10 rounded-[6px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[8.5px] font-bold text-slate-400">
                                   E-KARTU
                                 </div>
                               )}
                             </td>
                             <td className="py-3 px-3 align-middle text-right">
-                              <div className="inline-flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => openEditModal(row)}
-                                  className="rounded-lg bg-amber-500/20 border border-amber-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-amber-300 cursor-pointer active:scale-95 transition-transform"
-                                >
-                                  EDIT
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteRecord(row.id)}
-                                  className="rounded-lg bg-rose-500/20 border border-rose-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-rose-300 cursor-pointer active:scale-95 transition-transform"
-                                >
-                                  HAPUS
-                                </button>
-                              </div>
+                              {confirmDeleteId === row.id ? (
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={deletingId === row.id}
+                                    onClick={() => void handleDeleteRecord(row.id)}
+                                    className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-white cursor-pointer disabled:opacity-50"
+                                  >
+                                    {deletingId === row.id ? '...' : 'YA, HAPUS'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteId(null)}
+                                    className="rounded-lg bg-slate-700 px-2 py-1.5 text-[10px] font-bold uppercase text-slate-200 cursor-pointer"
+                                  >
+                                    BATAL
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditModal(row)}
+                                    className="rounded-lg bg-amber-500/20 border border-amber-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-amber-300 cursor-pointer active:scale-95 transition-transform"
+                                  >
+                                    EDIT
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteId(row.id)}
+                                    className="rounded-lg bg-rose-500/20 border border-rose-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-rose-300 cursor-pointer active:scale-95 transition-transform"
+                                  >
+                                    HAPUS
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         ))
@@ -1702,7 +2469,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
             <div className="w-full max-w-[390px] max-h-[90vh] overflow-y-auto rounded-[20px] bg-[#111827] border border-slate-700 p-5 shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3 sticky top-0 bg-[#111827] z-10">
                 <h3 className="text-[15px] font-extrabold uppercase tracking-[0.04em] text-white">
-                  {editingId ? 'Edit Data Pemegang' : 'Tambah Data Pemegang'}
+                  {editingId !== null ? 'Edit Data Pemegang' : 'Tambah Data Pemegang'}
                 </h3>
                 <button
                   type="button"
@@ -1715,6 +2482,12 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
               </div>
 
               <form onSubmit={handleSaveRecord} className="mt-4 space-y-3.5">
+                {adminError && (
+                  <div className="rounded-[10px] bg-rose-950/80 border border-rose-700/80 px-3 py-2 text-[11.5px] text-rose-200">
+                    {adminError}
+                  </div>
+                )}
+
                 {/* 1. UPLOAD FOTO */}
                 <div>
                   <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
@@ -1862,9 +2635,19 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
 
                 {/* 10. UPLOAD E-KARTU LSP BNSP */}
                 <div>
-                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
-                    UPLOAD E-KARTU LSP BNSP
-                  </label>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34]">
+                      UPLOAD E-KARTU LSP BNSP
+                    </label>
+                    <button
+                      type="button"
+                      disabled={generatingCard}
+                      onClick={() => void handleGenerateAutoEKartu()}
+                      className="rounded-md bg-amber-500/20 border border-amber-400/50 px-2 py-1 text-[9.5px] font-extrabold uppercase tracking-[0.04em] text-amber-300 cursor-pointer hover:bg-amber-500/30 disabled:opacity-50"
+                    >
+                      {generatingCard ? 'MEMBUAT...' : '⚡ AUTO GENERATE + QR'}
+                    </button>
+                  </div>
                   <input
                     type="file"
                     accept="image/*"
@@ -1876,11 +2659,11 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                       <img
                         src={formEKartu}
                         alt="Preview E-Kartu"
-                        className="w-full h-[140px] rounded-[12px] object-cover border-[1.5px] border-amber-400"
+                        className="w-full h-auto rounded-[12px] object-contain border-[1.5px] border-amber-400 bg-[#1B2029]"
                       />
                     ) : (
-                      <div className="w-full h-[90px] rounded-[12px] bg-slate-800/80 border border-dashed border-slate-700 flex items-center justify-center text-[10.5px] font-bold text-slate-400">
-                        BELUM ADA E-KARTU DIUPLOAD
+                      <div className="w-full h-[90px] rounded-[12px] bg-slate-800/80 border border-dashed border-slate-700 px-3 text-center flex items-center justify-center text-[10.5px] font-bold text-slate-400">
+                        KOSONG = OTOMATIS DIGENERATE DENGAN QR SAAT SIMPAN
                       </div>
                     )}
                   </div>
@@ -1889,16 +2672,18 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                 <div className="pt-2 flex gap-2.5">
                   <button
                     type="button"
+                    disabled={saving}
                     onClick={() => setFormOpen(false)}
-                    className="flex-1 rounded-[10px] bg-slate-800 border border-slate-700 py-2.5 text-[12px] font-bold uppercase text-slate-300 cursor-pointer"
+                    className="flex-1 rounded-[10px] bg-slate-800 border border-slate-700 py-2.5 text-[12px] font-bold uppercase text-slate-300 cursor-pointer disabled:opacity-50"
                   >
                     BATAL
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 rounded-[10px] bg-emerald-500 border-b-[3px] border-b-emerald-700 py-2.5 text-[12px] font-extrabold uppercase text-slate-950 cursor-pointer"
+                    disabled={saving}
+                    className="flex-1 rounded-[10px] bg-emerald-500 border-b-[3px] border-b-emerald-700 py-2.5 text-[12px] font-extrabold uppercase text-slate-950 cursor-pointer disabled:opacity-60"
                   >
-                    SIMPAN
+                    {saving ? 'MENYIMPAN...' : 'SIMPAN'}
                   </button>
                 </div>
               </form>
@@ -1913,10 +2698,31 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
 export { HalamanAdminDashboard as AdminDashboard };
 
 export default function App() {
-  const [page, setPage] = useState<'beranda' | 'sebelum' | 'sesudah' | 'verifikasi' | 'admin'>('beranda');
-  const [judulVerifikasi, setJudulVerifikasi] = useState(
-    'Pemegang Sertifikat Operasi Scaffolding LSP PEM INDONESIA'
+  const initialQuery = (() => {
+    if (typeof window === 'undefined') {
+      return { nik: '', jenis: '' };
+    }
+    const params = new URLSearchParams(window.location.search);
+    return {
+      nik: params.get('nik') || '',
+      jenis: params.get('jenis') || '',
+    };
+  })();
+
+  const [page, setPage] = useState<'beranda' | 'sebelum' | 'sesudah' | 'verifikasi' | 'admin'>(
+    initialQuery.nik ? 'verifikasi' : 'beranda'
   );
+  const [judulVerifikasi, setJudulVerifikasi] = useState(() => {
+    if (initialQuery.jenis) {
+      const titlePart = initialQuery.jenis.split('::')[1] || initialQuery.jenis;
+      return `Pemegang Sertifikat ${titlePart}`;
+    }
+    return 'Pemegang Sertifikat Operasi Scaffolding LSP PEM INDONESIA';
+  });
+  const [jenisDataVerifikasi, setJenisDataVerifikasi] = useState<string | undefined>(
+    initialQuery.jenis || undefined
+  );
+  const [initialNikVerifikasi] = useState(initialQuery.nik);
 
   if (page === 'sebelum') {
     return (
@@ -1932,8 +2738,9 @@ export default function App() {
       <HalamanSetelahNov2022
         onBack={() => setPage('beranda')}
         onHome={() => setPage('beranda')}
-        onVerifikasi={(judul) => {
+        onVerifikasi={(judul, jenisData) => {
           setJudulVerifikasi(judul);
+          setJenisDataVerifikasi(jenisData);
           setPage('verifikasi');
         }}
         onAdminLoginSuccess={() => setPage('admin')}
@@ -1945,6 +2752,8 @@ export default function App() {
     return (
       <HalamanVerifikasi
         judul={judulVerifikasi}
+        jenisData={jenisDataVerifikasi}
+        initialNik={initialNikVerifikasi}
         onBack={() => setPage('sesudah')}
       />
     );
