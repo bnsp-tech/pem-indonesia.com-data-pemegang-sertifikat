@@ -3,13 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState } from 'react';
+import { HalamanSetelahNov2022 } from './HalamanSetelahNov2022';
 
 export default function App() {
+  const [view, setView] = useState<'home' | 'setelah'>('setelah');
+
   const handleSelectOption = (type: 'sebelum' | 'setelah') => {
-    // Interactive feedback while maintaining exact visual presentation
+    if (type === 'setelah') {
+      setView('setelah');
+      return;
+    }
     console.log(`Pilihan dipilih: ${type} 01 November 2022`);
   };
+
+  if (view === 'setelah') {
+    return (
+      <HalamanSetelahNov2022
+        onBack={() => setView('home')}
+        onHome={() => setView('home')}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white flex justify-center selection:bg-rose-200">
