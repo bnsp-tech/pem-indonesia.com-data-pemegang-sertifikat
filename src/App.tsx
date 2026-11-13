@@ -1203,8 +1203,14 @@ interface AdminPemegangRecord {
   id: string;
   nama: string;
   nik: string;
+  programLpk: string;
+  noSertifikatBnsp: string;
+  noRegisterBnsp: string;
+  tanggalTerbit: string;
+  berlakuSampai: string;
   status: string;
   foto: string;
+  eKartu: string;
 }
 
 const ADMIN_PROGRAM_GROUPS: { lembaga: string; items: AdminProgramItem[] }[] = [
@@ -1280,20 +1286,34 @@ function createInitialAdminDummyData(): Record<string, AdminPemegangRecord[]> {
           ? ['ANI WIJAYA', 'SITI RAHMA']
           : sampleNames[index % sampleNames.length];
       const baseNum = 731103300100 + index * 17;
+      const certSuffix = String(6812 + index * 13).padStart(7, '0');
+      const regSuffix = String(6871 + index * 11).padStart(7, '0');
       data[item.key] = [
         {
           id: `${item.key}-1`,
           nama: pair[0],
           nik: `${baseNum}`,
+          programLpk: item.title.toUpperCase(),
+          noSertifikatBnsp: `78429.8113.${certSuffix}`,
+          noRegisterBnsp: `F.2023.${regSuffix}`,
+          tanggalTerbit: '2023-09-25',
+          berlakuSampai: '2026-09-25',
           status: 'VALID AKTIF',
           foto: '',
+          eKartu: '',
         },
         {
           id: `${item.key}-2`,
           nama: pair[1],
           nik: `${baseNum + 5}`,
+          programLpk: item.title.toUpperCase(),
+          noSertifikatBnsp: `78429.8113.${String(Number(certSuffix) + 1).padStart(7, '0')}`,
+          noRegisterBnsp: `F.2023.${String(Number(regSuffix) + 1).padStart(7, '0')}`,
+          tanggalTerbit: '2024-03-14',
+          berlakuSampai: '2027-03-14',
           status: 'VALID AKTIF',
           foto: '',
+          eKartu: '',
         },
       ];
       index += 1;
@@ -1314,26 +1334,44 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
   const [selectedProgram, setSelectedProgram] = useState<AdminProgramItem | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formFoto, setFormFoto] = useState('');
   const [formNama, setFormNama] = useState('');
   const [formNik, setFormNik] = useState('');
+  const [formProgramLpk, setFormProgramLpk] = useState('');
+  const [formNoSertifikat, setFormNoSertifikat] = useState('');
+  const [formNoRegister, setFormNoRegister] = useState('');
+  const [formTanggalTerbit, setFormTanggalTerbit] = useState('2023-09-25');
+  const [formBerlakuSampai, setFormBerlakuSampai] = useState('2026-09-25');
   const [formStatus, setFormStatus] = useState('VALID AKTIF');
-  const [formFoto, setFormFoto] = useState('');
+  const [formEKartu, setFormEKartu] = useState('');
 
   const openTambahModal = () => {
     setEditingId(null);
+    setFormFoto('');
     setFormNama('');
     setFormNik('');
+    setFormProgramLpk(selectedProgram ? selectedProgram.title.toUpperCase() : '');
+    setFormNoSertifikat('');
+    setFormNoRegister('');
+    setFormTanggalTerbit('2024-01-15');
+    setFormBerlakuSampai('2027-01-15');
     setFormStatus('VALID AKTIF');
-    setFormFoto('');
+    setFormEKartu('');
     setFormOpen(true);
   };
 
   const openEditModal = (record: AdminPemegangRecord) => {
     setEditingId(record.id);
+    setFormFoto(record.foto);
     setFormNama(record.nama);
     setFormNik(record.nik);
+    setFormProgramLpk(record.programLpk);
+    setFormNoSertifikat(record.noSertifikatBnsp);
+    setFormNoRegister(record.noRegisterBnsp);
+    setFormTanggalTerbit(record.tanggalTerbit);
+    setFormBerlakuSampai(record.berlakuSampai);
     setFormStatus(record.status);
-    setFormFoto(record.foto);
+    setFormEKartu(record.eKartu);
     setFormOpen(true);
   };
 
@@ -1349,11 +1387,26 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     reader.readAsDataURL(file);
   };
 
+  const handleUploadEKartu = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setFormEKartu(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSaveRecord = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProgram) return;
     const cleanedNama = formNama.trim().toUpperCase() || 'TANPA NAMA';
     const cleanedNik = formNik.trim() || '000000000000';
+    const cleanedProgram = formProgramLpk.trim().toUpperCase() || selectedProgram.title.toUpperCase();
+    const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
+    const cleanedNoRegister = formNoRegister.trim() || '-';
     const key = selectedProgram.key;
 
     setDataByProgram((prev) => {
@@ -1365,10 +1418,16 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
             row.id === editingId
               ? {
                   ...row,
+                  foto: formFoto,
                   nama: cleanedNama,
                   nik: cleanedNik,
+                  programLpk: cleanedProgram,
+                  noSertifikatBnsp: cleanedNoSertifikat,
+                  noRegisterBnsp: cleanedNoRegister,
+                  tanggalTerbit: formTanggalTerbit,
+                  berlakuSampai: formBerlakuSampai,
                   status: formStatus,
-                  foto: formFoto,
+                  eKartu: formEKartu,
                 }
               : row
           ),
@@ -1376,10 +1435,16 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
       }
       const newRecord: AdminPemegangRecord = {
         id: `${key}-${Date.now()}`,
+        foto: formFoto,
         nama: cleanedNama,
         nik: cleanedNik,
+        programLpk: cleanedProgram,
+        noSertifikatBnsp: cleanedNoSertifikat,
+        noRegisterBnsp: cleanedNoRegister,
+        tanggalTerbit: formTanggalTerbit,
+        berlakuSampai: formBerlakuSampai,
         status: formStatus,
-        foto: formFoto,
+        eKartu: formEKartu,
       };
       return {
         ...prev,
@@ -1520,19 +1585,22 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
               {/* Dummy Data Table */}
               <div className="rounded-[16px] border border-slate-800 bg-[#111827] overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse min-w-[380px]">
+                  <table className="w-full text-left border-collapse min-w-[680px]">
                     <thead>
                       <tr className="bg-[#182132] border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-[0.06em] text-slate-400">
                         <th className="py-2.5 px-3">Foto</th>
                         <th className="py-2.5 px-2.5">Nama / NIK</th>
+                        <th className="py-2.5 px-2.5">Program &amp; BNSP</th>
+                        <th className="py-2.5 px-2.5">Masa Berlaku</th>
                         <th className="py-2.5 px-2.5">Status</th>
+                        <th className="py-2.5 px-2.5">E-Kartu</th>
                         <th className="py-2.5 px-3 text-right">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/80 text-[12px]">
                       {activeRecords.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="py-8 px-4 text-center text-slate-500">
+                          <td colSpan={7} className="py-8 px-4 text-center text-slate-500">
                             Belum ada data. Klik tombol TAMBAH untuk menambahkan data.
                           </td>
                         </tr>
@@ -1561,6 +1629,21 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                               </div>
                             </td>
                             <td className="py-3 px-2.5 align-middle">
+                              <div className="text-[11px] font-bold text-slate-200 leading-tight">
+                                {row.programLpk}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                                {row.noSertifikatBnsp}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-mono">
+                                {row.noRegisterBnsp}
+                              </div>
+                            </td>
+                            <td className="py-3 px-2.5 align-middle text-[10.5px] text-slate-300 font-mono">
+                              <div>Terbit: {row.tanggalTerbit}</div>
+                              <div className="text-slate-400">Exp: {row.berlakuSampai}</div>
+                            </td>
+                            <td className="py-3 px-2.5 align-middle">
                               <span
                                 className={`inline-block rounded-full px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-[0.04em] ${
                                   row.status === 'VALID AKTIF'
@@ -1570,6 +1653,19 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                               >
                                 {row.status}
                               </span>
+                            </td>
+                            <td className="py-3 px-2.5 align-middle">
+                              {row.eKartu ? (
+                                <img
+                                  src={row.eKartu}
+                                  alt={`E-Kartu ${row.nama}`}
+                                  className="w-14 h-9 rounded-[6px] object-cover border border-amber-500/60"
+                                />
+                              ) : (
+                                <div className="w-14 h-9 rounded-[6px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[8.5px] font-bold text-slate-400">
+                                  E-KARTU
+                                </div>
+                              )}
                             </td>
                             <td className="py-3 px-3 align-middle text-right">
                               <div className="inline-flex items-center gap-1.5">
@@ -1603,8 +1699,8 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         {/* Modal Form TAMBAH / EDIT */}
         {formOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
-            <div className="w-full max-w-[370px] rounded-[20px] bg-[#111827] border border-slate-700 p-5 shadow-2xl">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="w-full max-w-[390px] max-h-[90vh] overflow-y-auto rounded-[20px] bg-[#111827] border border-slate-700 p-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3 sticky top-0 bg-[#111827] z-10">
                 <h3 className="text-[15px] font-extrabold uppercase tracking-[0.04em] text-white">
                   {editingId ? 'Edit Data Pemegang' : 'Tambah Data Pemegang'}
                 </h3>
@@ -1619,9 +1715,36 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
               </div>
 
               <form onSubmit={handleSaveRecord} className="mt-4 space-y-3.5">
+                {/* 1. UPLOAD FOTO */}
                 <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
-                    Nama Pemegang
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    UPLOAD FOTO
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadFoto}
+                    className="w-full text-[11.5px] text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:text-white hover:file:bg-slate-600 cursor-pointer"
+                  />
+                  <div className="mt-2">
+                    {formFoto ? (
+                      <img
+                        src={formFoto}
+                        alt="Preview Foto"
+                        className="w-[74px] h-[92px] rounded-[10px] object-cover border-[1.5px] border-amber-400"
+                      />
+                    ) : (
+                      <div className="w-[74px] h-[92px] rounded-[10px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[9.5px] font-bold text-slate-400">
+                        NO FOTO
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. NAMA PEMEGANG */}
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    NAMA PEMEGANG
                   </label>
                   <input
                     type="text"
@@ -1633,8 +1756,9 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                   />
                 </div>
 
+                {/* 3. NIK */}
                 <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
                     NIK
                   </label>
                   <input
@@ -1648,9 +1772,83 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                   />
                 </div>
 
+                {/* 4. PROGRAM LPK */}
                 <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
-                    Status
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    PROGRAM LPK
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formProgramLpk}
+                    onChange={(e) => setFormProgramLpk(e.target.value)}
+                    placeholder="Contoh: OPERATOR SCAFFOLDING"
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* 5. NO SERTIFIKAT BNSP */}
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    NO SERTIFIKAT BNSP
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formNoSertifikat}
+                    onChange={(e) => setFormNoSertifikat(e.target.value)}
+                    placeholder="Contoh: 78429.8113.0006812"
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* 6. NO REGISTER BNSP */}
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    NO REGISTER BNSP
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formNoRegister}
+                    onChange={(e) => setFormNoRegister(e.target.value)}
+                    placeholder="Contoh: F.2023.0006871"
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* 7. TANGGAL TERBIT */}
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    TANGGAL TERBIT
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formTanggalTerbit}
+                    onChange={(e) => setFormTanggalTerbit(e.target.value)}
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500 [color-scheme:dark]"
+                  />
+                </div>
+
+                {/* 8. BERLAKU SAMPAI */}
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    BERLAKU SAMPAI
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formBerlakuSampai}
+                    onChange={(e) => setFormBerlakuSampai(e.target.value)}
+                    className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500 [color-scheme:dark]"
+                  />
+                </div>
+
+                {/* 9. STATUS SERTIFIKAT */}
+                <div>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    STATUS SERTIFIKAT
                   </label>
                   <select
                     value={formStatus}
@@ -1662,28 +1860,29 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                   </select>
                 </div>
 
+                {/* 10. UPLOAD E-KARTU LSP BNSP */}
                 <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-[0.05em] text-slate-300 mb-1.5">
-                    Upload Foto
+                  <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
+                    UPLOAD E-KARTU LSP BNSP
                   </label>
-                  <div className="flex items-center gap-3">
-                    {formFoto ? (
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleUploadEKartu}
+                    className="w-full text-[11.5px] text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:text-white hover:file:bg-slate-600 cursor-pointer"
+                  />
+                  <div className="mt-2">
+                    {formEKartu ? (
                       <img
-                        src={formFoto}
-                        alt="Preview"
-                        className="w-12 h-14 rounded-[8px] object-cover border border-amber-400 shrink-0"
+                        src={formEKartu}
+                        alt="Preview E-Kartu"
+                        className="w-full h-[140px] rounded-[12px] object-cover border-[1.5px] border-amber-400"
                       />
                     ) : (
-                      <div className="w-12 h-14 rounded-[8px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400 shrink-0">
-                        NO FOTO
+                      <div className="w-full h-[90px] rounded-[12px] bg-slate-800/80 border border-dashed border-slate-700 flex items-center justify-center text-[10.5px] font-bold text-slate-400">
+                        BELUM ADA E-KARTU DIUPLOAD
                       </div>
                     )}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleUploadFoto}
-                      className="w-full text-[11.5px] text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:text-white hover:file:bg-slate-600 cursor-pointer"
-                    />
                   </div>
                 </div>
 
