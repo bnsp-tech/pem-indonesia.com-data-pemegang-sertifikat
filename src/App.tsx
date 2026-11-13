@@ -476,6 +476,13 @@ export function HalamanSetelahNov2022({
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef<number | null>(null);
 
+  useEffect(() => {
+    const yearEl = document.getElementById('currentYear');
+    if (yearEl) {
+      yearEl.textContent = String(new Date().getFullYear());
+    }
+  }, []);
+
   const handleSecretFooterTap = () => {
     if (tapTimerRef.current !== null) {
       window.clearTimeout(tapTimerRef.current);
@@ -958,7 +965,7 @@ export function HalamanSetelahNov2022({
           className="px-6 pt-1 pb-7 text-center select-none cursor-default"
         >
           <p className="text-[11.5px] text-[#6B7280] leading-[1.5]">
-            © 2026{' '}
+            © <span id="currentYear">{new Date().getFullYear()}</span>{' '}
             <span className="font-bold text-[#7D0609]">
               Asosiasi Pengembangan Indonesia Kompeten (APIK)
             </span>
@@ -982,6 +989,13 @@ export function HalamanSetelahNov2022({
 
 export function HalamanSebelumNov2022({ onBack, onHome }: HalamanSetelahNov2022Props) {
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    const yearEl = document.getElementById('currentYear');
+    if (yearEl) {
+      yearEl.textContent = String(new Date().getFullYear());
+    }
+  }, []);
 
   return (
     <div className="min-h-screen w-full bg-[#121215] flex justify-center font-sans antialiased">
@@ -1146,7 +1160,7 @@ export function HalamanSebelumNov2022({ onBack, onHome }: HalamanSetelahNov2022P
         {/* Footer */}
         <footer className="px-6 pt-1 pb-7 text-center">
           <p className="text-[11.5px] text-[#6B7280] leading-[1.5]">
-            © 2026{' '}
+            © <span id="currentYear">{new Date().getFullYear()}</span>{' '}
             <span className="font-bold text-[#7D0609]">
               Asosiasi Pengembangan Indonesia Kompeten (APIK)
             </span>
