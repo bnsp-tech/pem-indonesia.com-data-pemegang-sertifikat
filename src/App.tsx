@@ -54,19 +54,116 @@ function normalizePublicRow(raw: Record<string, unknown>): PemegangSertifikatRow
   };
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+interface CompressedImageResult {
+  dataUrl: string;
+  fileName: string;
+  contentType: string;
+  compressedBytes: number;
+}
+
+function getDataUrlBinarySize(dataUrl: string): number {
+  const commaIdx = dataUrl.indexOf(',');
+  const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+  const paddingMatch = base64.match(/=+$/);
+  const padding = paddingMatch ? paddingMatch[0].length : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function formatReadableFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(2)} MB`;
+}
+
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-      } else {
-        reject(new Error('Gagal membaca file gambar.'));
-      }
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
     };
-    reader.onerror = () => reject(new Error('Gagal membaca file gambar.'));
-    reader.readAsDataURL(file);
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Gagal memproses file gambar. Pastikan file gambar valid.'));
+    };
+    img.src = objectUrl;
   });
+}
+
+async function compressImageWithCanvas(
+  file: File,
+  options: {
+    maxLongSide: number;
+    minLongSide: number;
+    initialQuality: number;
+    minQuality: number;
+    targetMaxBytes: number;
+  }
+): Promise<CompressedImageResult> {
+  const img = await loadImageFromFile(file);
+  const srcWidth = img.naturalWidth || img.width;
+  const srcHeight = img.naturalHeight || img.height;
+
+  if (!srcWidth || !srcHeight) {
+    throw new Error('Dimensi gambar tidak valid.');
+  }
+
+  const renderAt = (longSideLimit: number, quality: number): { dataUrl: string; bytes: number } => {
+    const longest = Math.max(srcWidth, srcHeight);
+    const scale = longest > longSideLimit ? longSideLimit / longest : 1;
+    const targetW = Math.max(1, Math.round(srcWidth * scale));
+    const targetH = Math.max(1, Math.round(srcHeight * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('Canvas browser tidak tersedia untuk kompresi gambar.');
+    }
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, targetW, targetH);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, targetW, targetH);
+
+    const safeQuality = Math.max(0.75, options.minQuality, Math.min(1, quality));
+    const dataUrl = canvas.toDataURL('image/jpeg', safeQuality);
+    return {
+      dataUrl,
+      bytes: getDataUrlBinarySize(dataUrl),
+    };
+  };
+
+  let currentLongSide = options.maxLongSide;
+  let currentQuality = options.initialQuality;
+  let result = renderAt(currentLongSide, currentQuality);
+
+  while (result.bytes > options.targetMaxBytes && currentQuality > Math.max(0.75, options.minQuality)) {
+    currentQuality = Math.max(0.75, options.minQuality, Number((currentQuality - 0.04).toFixed(2)));
+    result = renderAt(currentLongSide, currentQuality);
+  }
+
+  while (
+    result.bytes > options.targetMaxBytes &&
+    Math.min(Math.max(srcWidth, srcHeight), currentLongSide) > options.minLongSide
+  ) {
+    const nextSide = Math.max(options.minLongSide, Math.round(currentLongSide * 0.85));
+    if (nextSide === currentLongSide) break;
+    currentLongSide = nextSide;
+    result = renderAt(currentLongSide, currentQuality);
+  }
+
+  const baseName = file.name.replace(/\.[^.]+$/, '') || 'gambar';
+  return {
+    dataUrl: result.dataUrl,
+    fileName: `${baseName}.jpg`,
+    contentType: 'image/jpeg',
+    compressedBytes: result.bytes,
+  };
 }
 
 const BULAN_INDONESIA = [
@@ -1998,6 +2095,8 @@ export function HalamanAdminDashboard({
   const [formFoto, setFormFoto] = useState('');
   const [formFotoDataUrl, setFormFotoDataUrl] = useState<string | null>(null);
   const [formFotoMeta, setFormFotoMeta] = useState<{ name: string; type: string } | null>(null);
+  const [formFotoSizeBytes, setFormFotoSizeBytes] = useState<number | null>(null);
+  const [compressingFoto, setCompressingFoto] = useState(false);
 
   const [formNama, setFormNama] = useState('');
   const [formNik, setFormNik] = useState('');
@@ -2010,6 +2109,8 @@ export function HalamanAdminDashboard({
   const [formEKartu, setFormEKartu] = useState('');
   const [formEKartuDataUrl, setFormEKartuDataUrl] = useState<string | null>(null);
   const [formEKartuMeta, setFormEKartuMeta] = useState<{ name: string; type: string } | null>(null);
+  const [formEKartuSizeBytes, setFormEKartuSizeBytes] = useState<number | null>(null);
+  const [compressingEKartu, setCompressingEKartu] = useState(false);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
     let token = accessToken || '';
@@ -2123,6 +2224,7 @@ export function HalamanAdminDashboard({
     setFormFoto('');
     setFormFotoDataUrl(null);
     setFormFotoMeta(null);
+    setFormFotoSizeBytes(null);
     setFormNama('');
     setFormNik('');
     setFormProgramLpk(defaultProgram || '');
@@ -2134,6 +2236,7 @@ export function HalamanAdminDashboard({
     setFormEKartu('');
     setFormEKartuDataUrl(null);
     setFormEKartuMeta(null);
+    setFormEKartuSizeBytes(null);
     setModalError(null);
   };
 
@@ -2154,6 +2257,7 @@ export function HalamanAdminDashboard({
     setFormFoto(currentPhoto);
     setFormFotoDataUrl(null);
     setFormFotoMeta(null);
+    setFormFotoSizeBytes(null);
     setFormNama(record.nama_pemegang || '');
     setFormNik(record.nik || '');
     setFormProgramLpk(
@@ -2171,6 +2275,7 @@ export function HalamanAdminDashboard({
     setFormEKartu(record.url_e_kartu || '');
     setFormEKartuDataUrl(null);
     setFormEKartuMeta(null);
+    setFormEKartuSizeBytes(null);
     setModalError(null);
     setFormOpen(true);
   };
@@ -2183,17 +2288,27 @@ export function HalamanAdminDashboard({
       setModalError('Upload foto gagal: File harus berupa gambar (JPG, PNG, WEBP).');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setModalError('Upload foto gagal: Ukuran file maksimal 5 MB.');
+    if (file.size > 25 * 1024 * 1024) {
+      setModalError('Upload foto gagal: Ukuran file mentah maksimal 25 MB.');
       return;
     }
+    setCompressingFoto(true);
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      setFormFoto(dataUrl);
-      setFormFotoDataUrl(dataUrl);
-      setFormFotoMeta({ name: file.name, type: file.type });
+      const compressed = await compressImageWithCanvas(file, {
+        maxLongSide: 1200,
+        minLongSide: 800,
+        initialQuality: 0.82,
+        minQuality: 0.75,
+        targetMaxBytes: 800 * 1024,
+      });
+      setFormFoto(compressed.dataUrl);
+      setFormFotoDataUrl(compressed.dataUrl);
+      setFormFotoMeta({ name: compressed.fileName, type: compressed.contentType });
+      setFormFotoSizeBytes(compressed.compressedBytes);
     } catch (err) {
-      setModalError(err instanceof Error ? err.message : 'Gagal membaca file foto.');
+      setModalError(err instanceof Error ? err.message : 'Gagal memproses kompresi foto.');
+    } finally {
+      setCompressingFoto(false);
     }
   };
 
@@ -2205,17 +2320,27 @@ export function HalamanAdminDashboard({
       setModalError('Upload E-Kartu gagal: File harus berupa gambar.');
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setModalError('Upload E-Kartu gagal: Ukuran file maksimal 5 MB.');
+    if (file.size > 25 * 1024 * 1024) {
+      setModalError('Upload E-Kartu gagal: Ukuran file mentah maksimal 25 MB.');
       return;
     }
+    setCompressingEKartu(true);
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      setFormEKartu(dataUrl);
-      setFormEKartuDataUrl(dataUrl);
-      setFormEKartuMeta({ name: file.name, type: file.type });
+      const compressed = await compressImageWithCanvas(file, {
+        maxLongSide: 1600,
+        minLongSide: 1000,
+        initialQuality: 0.88,
+        minQuality: 0.75,
+        targetMaxBytes: 1200 * 1024,
+      });
+      setFormEKartu(compressed.dataUrl);
+      setFormEKartuDataUrl(compressed.dataUrl);
+      setFormEKartuMeta({ name: compressed.fileName, type: compressed.contentType });
+      setFormEKartuSizeBytes(compressed.compressedBytes);
     } catch (err) {
-      setModalError(err instanceof Error ? err.message : 'Gagal membaca file E-Kartu.');
+      setModalError(err instanceof Error ? err.message : 'Gagal memproses kompresi E-Kartu.');
+    } finally {
+      setCompressingEKartu(false);
     }
   };
 
@@ -2247,6 +2372,7 @@ export function HalamanAdminDashboard({
       setFormEKartu(generated.dataUrl);
       setFormEKartuDataUrl(generated.dataUrl);
       setFormEKartuMeta({ name: `ekartu-${cleanedNik}.png`, type: 'image/png' });
+      setFormEKartuSizeBytes(getDataUrlBinarySize(generated.dataUrl));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gagal generate E-Kartu otomatis.';
       setModalError(message);
@@ -2315,6 +2441,13 @@ export function HalamanAdminDashboard({
         } catch {
           // Lanjutkan simpan walau auto-generate E-Kartu gagal
         }
+      }
+
+      const totalBase64Bytes =
+        (formFotoDataUrl ? formFotoDataUrl.length : 0) +
+        (eKartuPayloadDataUrl ? eKartuPayloadDataUrl.length : 0);
+      if (totalBase64Bytes > 3.5 * 1024 * 1024) {
+        throw new Error('Foto terlalu besar, coba pilih foto yang lebih kecil');
       }
 
       const requestBody = {
@@ -2387,7 +2520,11 @@ export function HalamanAdminDashboard({
       setFormOpen(false);
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : 'Gagal menyimpan data ke Supabase.';
-      setModalError(rawMsg.startsWith('Gagal') ? rawMsg : `Gagal: ${rawMsg}`);
+      setModalError(
+        rawMsg.startsWith('Gagal') || rawMsg.startsWith('Foto terlalu besar')
+          ? rawMsg
+          : `Gagal: ${rawMsg}`
+      );
     } finally {
       setSaving(false);
     }
@@ -2933,6 +3070,16 @@ export function HalamanAdminDashboard({
                       </span>
                     )}
                   </div>
+                  {compressingFoto && (
+                    <div className="mt-1.5 text-[11px] font-semibold text-amber-300">
+                      Mengompres foto di browser...
+                    </div>
+                  )}
+                  {!compressingFoto && formFotoSizeBytes !== null && (
+                    <div className="mt-1.5 text-[11px] font-semibold text-emerald-300">
+                      Ukuran setelah kompres: {formatReadableFileSize(formFotoSizeBytes)}
+                    </div>
+                  )}
                 </div>
 
                 {/* 2. NAMA PEMEGANG */}
@@ -3108,6 +3255,16 @@ export function HalamanAdminDashboard({
                       </div>
                     )}
                   </div>
+                  {compressingEKartu && (
+                    <div className="mt-1.5 text-[11px] font-semibold text-amber-300">
+                      Mengompres E-Kartu di browser...
+                    </div>
+                  )}
+                  {!compressingEKartu && formEKartuSizeBytes !== null && (
+                    <div className="mt-1.5 text-[11px] font-semibold text-emerald-300">
+                      Ukuran setelah kompres: {formatReadableFileSize(formEKartuSizeBytes)}
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-2 flex gap-2.5">
@@ -3121,7 +3278,7 @@ export function HalamanAdminDashboard({
                   </button>
                   <button
                     type="submit"
-                    disabled={saving}
+                    disabled={saving || compressingFoto || compressingEKartu}
                     className="flex-1 rounded-[10px] bg-emerald-500 border-b-[3px] border-b-emerald-700 py-2.5 text-[12px] font-extrabold uppercase text-slate-950 cursor-pointer disabled:opacity-60"
                   >
                     {saving ? 'MENYIMPAN...' : 'SIMPAN'}
