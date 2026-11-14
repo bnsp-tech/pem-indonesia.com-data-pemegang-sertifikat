@@ -613,7 +613,7 @@ function validateRequiredFields(body: AdminWriteBody) {
   };
 }
 
-async function startServer() {
+export async function createApp() {
   const app = express();
   app.use(express.json({ limit: '20mb' }));
 
@@ -969,28 +969,37 @@ async function startServer() {
     }
   });
 
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distDir = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distDir));
-    app.get('*', (req: Request, res: Response, next: NextFunction) => {
-      if (req.path.startsWith('/api/')) {
-        next();
-        return;
-      }
-      res.sendFile(path.join(distDir, 'index.html'));
-    });
+  if (process.env.VERCEL !== '1') {
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distDir = path.resolve(process.cwd(), 'dist');
+      app.use(express.static(distDir));
+      app.get('*', (req: Request, res: Response, next: NextFunction) => {
+        if (req.path.startsWith('/api/')) {
+          next();
+          return;
+        }
+        res.sendFile(path.join(distDir, 'index.html'));
+      });
+    }
   }
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createApp();
   app.listen(PORT, HOST, () => {
     console.log(`Server berjalan di http://${HOST}:${PORT}`);
   });
 }
 
-void startServer();
+if (process.env.VERCEL !== '1') {
+  void startServer();
+}
