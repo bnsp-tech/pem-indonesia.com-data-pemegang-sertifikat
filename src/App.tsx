@@ -17,16 +17,58 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export interface PemegangSertifikatRow {
   id: string | number;
   tanggal_terbit: string | null;
+  tanggal_berakhir?: string | null;
   berlaku_sampai: string | null;
-  jenis_data: string | null;
+  jenis_data?: string | null;
   nama_pemegang: string | null;
   nik: string | null;
   program_lpk: string | null;
   no_sertifikat_bnsp: string | null;
   no_register_bnsp: string | null;
-  status_sertifikat: string | null;
+  status_sertifikat?: string | null;
+  foto_url?: string | null;
   url_foto: string | null;
-  url_e_kartu: string | null;
+  url_e_kartu?: string | null;
+  created_at?: string | null;
+}
+
+const ADMIN_TOKEN_STORAGE_KEY = 'apik_super_admin_token';
+
+function normalizePublicRow(raw: Record<string, unknown>): PemegangSertifikatRow {
+  const expiry = (raw.tanggal_berakhir as string | null | undefined) ?? (raw.berlaku_sampai as string | null | undefined) ?? null;
+  const photo = (raw.foto_url as string | null | undefined) ?? (raw.url_foto as string | null | undefined) ?? null;
+  return {
+    id: raw.id as string | number,
+    tanggal_terbit: (raw.tanggal_terbit as string | null | undefined) ?? null,
+    tanggal_berakhir: expiry,
+    berlaku_sampai: expiry,
+    jenis_data: (raw.jenis_data as string | null | undefined) ?? null,
+    nama_pemegang: (raw.nama_pemegang as string | null | undefined) ?? null,
+    nik: (raw.nik as string | null | undefined) ?? null,
+    program_lpk: (raw.program_lpk as string | null | undefined) ?? null,
+    no_sertifikat_bnsp: (raw.no_sertifikat_bnsp as string | null | undefined) ?? null,
+    no_register_bnsp: (raw.no_register_bnsp as string | null | undefined) ?? null,
+    status_sertifikat: (raw.status_sertifikat as string | null | undefined) ?? 'VALID AKTIF',
+    foto_url: photo,
+    url_foto: photo,
+    url_e_kartu: (raw.url_e_kartu as string | null | undefined) ?? null,
+    created_at: (raw.created_at as string | null | undefined) ?? null,
+  };
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Gagal membaca file gambar.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Gagal membaca file gambar.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 const BULAN_INDONESIA = [
@@ -67,42 +109,6 @@ function buildVerificationUrl(nik: string, jenisData?: string | null): string {
     params.set('jenis', jenisData);
   }
   return `${origin}/?${params.toString()}`;
-}
-
-async function uploadFileToSupabaseBucket(
-  fileOrBlob: File | Blob,
-  folder: 'foto' | 'ekartu',
-  identifier: string
-): Promise<string> {
-  const safeId = identifier.replace(/[^a-zA-Z0-9_-]/g, '') || 'pemegang';
-  let ext = 'png';
-  let contentType = fileOrBlob.type || 'image/png';
-  if (fileOrBlob instanceof File && fileOrBlob.name.includes('.')) {
-    const rawExt = fileOrBlob.name.split('.').pop()?.toLowerCase();
-    if (rawExt) ext = rawExt.replace(/[^a-z0-9]/g, '') || 'png';
-  } else if (contentType.includes('jpeg') || contentType.includes('jpg')) {
-    ext = 'jpg';
-  } else if (contentType.includes('webp')) {
-    ext = 'webp';
-  }
-
-  const filePath = `${folder}/${safeId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-  const { error: uploadError } = await supabase.storage
-    .from('files')
-    .upload(filePath, fileOrBlob, {
-      upsert: true,
-      contentType,
-    });
-
-  if (uploadError) {
-    throw new Error(`Upload ke bucket 'files' gagal: ${uploadError.message}`);
-  }
-
-  const { data } = supabase.storage.from('files').getPublicUrl(filePath);
-  if (!data?.publicUrl) {
-    throw new Error("Gagal mendapatkan public URL dari bucket 'files'.");
-  }
-  return data.publicUrl;
 }
 
 function drawRoundedRectPath(
@@ -1244,7 +1250,7 @@ export function HalamanVerifikasi({
             ? 'Teknologi Informasi'
             : namaProgram.toUpperCase();
 
-        // Filter berdasarkan NIK dan program_lpk (1 NIK bisa memiliki banyak sertifikat di program berbeda)
+        // Publik read-only via Anon Key
         const { data: exactRows, error } = await supabase
           .from('data_pemegang')
           .select('*')
@@ -1256,9 +1262,9 @@ export function HalamanVerifikasi({
           throw new Error(error.message);
         }
 
-        let rows = (exactRows as PemegangSertifikatRow[] | null) ?? [];
+        let rows = ((exactRows as Record<string, unknown>[] | null) ?? []).map(normalizePublicRow);
 
-        // Fallback case-insensitive jika program_lpk di Supabase ditulis dengan huruf besar-kecil (Title Case)
+        // Fallback case-insensitive untuk program_lpk
         if (rows.length === 0) {
           const { data: ilikeRows, error: ilikeErr } = await supabase
             .from('data_pemegang')
@@ -1271,7 +1277,22 @@ export function HalamanVerifikasi({
             throw new Error(ilikeErr.message);
           }
 
-          rows = (ilikeRows as PemegangSertifikatRow[] | null) ?? [];
+          rows = ((ilikeRows as Record<string, unknown>[] | null) ?? []).map(normalizePublicRow);
+        }
+
+        // Fallback jika dibuka dari QR scan tanpa parameter jenis
+        if (rows.length === 0 && initialNik && !jenisData) {
+          const { data: nikRows, error: nikErr } = await supabase
+            .from('data_pemegang')
+            .select('*')
+            .eq('nik', inputNik)
+            .order('id', { ascending: false });
+
+          if (nikErr) {
+            throw new Error(nikErr.message);
+          }
+
+          rows = ((nikRows as Record<string, unknown>[] | null) ?? []).map(normalizePublicRow);
         }
 
         if (rows.length === 0) {
@@ -1290,7 +1311,7 @@ export function HalamanVerifikasi({
         setLoading(false);
       }
     },
-    [jenisData, namaProgram]
+    [initialNik, jenisData, namaProgram]
   );
 
   useEffect(() => {
@@ -1704,16 +1725,31 @@ interface LoginAdminProps {
 export function LoginAdmin({ onClose, onSuccess }: LoginAdminProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === 'admin' && password === 'Microsoft') {
-      setError('');
+    setSubmitting(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { token?: string; error?: string };
+      if (!res.ok || !json.token) {
+        setError(json.error || 'Username atau password tidak valid.');
+        return;
+      }
+      sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, json.token);
       onSuccess();
-      return;
+    } catch {
+      setError('Gagal terhubung ke server admin. Pastikan server berjalan.');
+    } finally {
+      setSubmitting(false);
     }
-    setError('Username atau password tidak valid.');
   };
 
   return (
@@ -1784,16 +1820,18 @@ export function LoginAdmin({ onClose, onSuccess }: LoginAdminProps) {
           <div className="pt-1 flex gap-2.5">
             <button
               type="button"
+              disabled={submitting}
               onClick={onClose}
-              className="flex-1 rounded-[12px] bg-slate-800 border border-slate-700 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.04em] text-slate-300 cursor-pointer active:scale-95 transition-transform"
+              className="flex-1 rounded-[12px] bg-slate-800 border border-slate-700 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.04em] text-slate-300 cursor-pointer active:scale-95 transition-transform disabled:opacity-50"
             >
               BATAL
             </button>
             <button
               type="submit"
-              className="flex-1 rounded-[12px] bg-gradient-to-b from-emerald-500 to-emerald-600 border-b-[3px] border-b-emerald-800 py-2.5 text-[12.5px] font-extrabold uppercase tracking-[0.06em] text-slate-950 cursor-pointer active:translate-y-[1px] transition-all"
+              disabled={submitting}
+              className="flex-1 rounded-[12px] bg-gradient-to-b from-emerald-500 to-emerald-600 border-b-[3px] border-b-emerald-800 py-2.5 text-[12.5px] font-extrabold uppercase tracking-[0.06em] text-slate-950 cursor-pointer active:translate-y-[1px] transition-all disabled:opacity-60"
             >
-              LOGIN
+              {submitting ? 'MASUK...' : 'LOGIN'}
             </button>
           </div>
         </form>
@@ -1904,50 +1942,103 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
   const [deletingId, setDeletingId] = useState<string | number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | number | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
+  const [storageWarning, setStorageWarning] = useState<string | null>(null);
 
+  const [activeTab, setActiveTab] = useState<'semua' | 'program'>('semua');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterProgram, setFilterProgram] = useState('ALL');
   const [selectedProgram, setSelectedProgram] = useState<AdminProgramItem | null>(null);
+
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | number | null>(null);
 
   const [formFoto, setFormFoto] = useState('');
-  const [formFotoFile, setFormFotoFile] = useState<File | null>(null);
+  const [formFotoDataUrl, setFormFotoDataUrl] = useState<string | null>(null);
+  const [formFotoMeta, setFormFotoMeta] = useState<{ name: string; type: string } | null>(null);
+
   const [formNama, setFormNama] = useState('');
   const [formNik, setFormNik] = useState('');
   const [formProgramLpk, setFormProgramLpk] = useState('');
   const [formNoSertifikat, setFormNoSertifikat] = useState('');
   const [formNoRegister, setFormNoRegister] = useState('');
   const [formTanggalTerbit, setFormTanggalTerbit] = useState('2024-01-15');
-  const [formBerlakuSampai, setFormBerlakuSampai] = useState('2027-01-15');
+  const [formTanggalBerakhir, setFormTanggalBerakhir] = useState('2027-01-15');
   const [formStatus, setFormStatus] = useState('VALID AKTIF');
   const [formEKartu, setFormEKartu] = useState('');
-  const [formEKartuFile, setFormEKartuFile] = useState<File | Blob | null>(null);
+  const [formEKartuDataUrl, setFormEKartuDataUrl] = useState<string | null>(null);
+  const [formEKartuMeta, setFormEKartuMeta] = useState<{ name: string; type: string } | null>(null);
+
+  const getAuthHeaders = useCallback((): Record<string, string> => {
+    const token = sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || '';
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  }, []);
+
+  const handleUnauthorized = useCallback(() => {
+    sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    onLogout();
+  }, [onLogout]);
+
+  const checkStorageStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/status', { headers: getAuthHeaders() });
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      const json = (await res.json().catch(() => ({}))) as {
+        bucketReady?: boolean;
+        error?: string;
+      };
+      if (!json.bucketReady && json.error) {
+        setStorageWarning(json.error);
+      } else {
+        setStorageWarning(null);
+      }
+    } catch {
+      setStorageWarning('Tidak dapat memeriksa status server Supabase Admin.');
+    }
+  }, [getAuthHeaders, handleUnauthorized]);
 
   const fetchAllRecords = useCallback(async () => {
     setLoadingData(true);
     setAdminError(null);
     try {
-      const { data, error } = await supabase
-        .from('data_pemegang')
-        .select('*')
-        .order('id', { ascending: false });
+      const res = await fetch('/api/admin/pemegang', {
+        headers: getAuthHeaders(),
+      });
 
-      if (error) {
-        throw new Error(error.message);
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
       }
 
-      setRecords((data as PemegangSertifikatRow[] | null) ?? []);
+      const json = (await res.json().catch(() => ({}))) as {
+        data?: PemegangSertifikatRow[];
+        error?: string;
+      };
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Gagal memuat data dari Supabase.');
+      }
+
+      setRecords(json.data ?? []);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gagal memuat data dari Supabase.';
-      setAdminError(`Gagal memuat data Supabase: ${message}`);
+      setAdminError(message);
     } finally {
       setLoadingData(false);
     }
-  }, []);
+  }, [getAuthHeaders, handleUnauthorized]);
 
   useEffect(() => {
+    void checkStorageStatus();
     void fetchAllRecords();
-  }, [fetchAllRecords]);
+  }, [checkStorageStatus, fetchAllRecords]);
 
   const dataByProgram: Record<string, PemegangSertifikatRow[]> = {};
   for (const row of records) {
@@ -1962,28 +2053,42 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     dataByProgram[resolvedKey].push(row);
   }
 
-  const openTambahModal = () => {
+  const resetFormState = (defaultProgram?: string) => {
     setEditingId(null);
     setFormFoto('');
-    setFormFotoFile(null);
+    setFormFotoDataUrl(null);
+    setFormFotoMeta(null);
     setFormNama('');
     setFormNik('');
-    setFormProgramLpk(selectedProgram ? normalizeProgramLpkValue(selectedProgram.title) : '');
+    setFormProgramLpk(defaultProgram || '');
     setFormNoSertifikat('');
     setFormNoRegister('');
     setFormTanggalTerbit('2024-01-15');
-    setFormBerlakuSampai('2027-01-15');
+    setFormTanggalBerakhir('2027-01-15');
     setFormStatus('VALID AKTIF');
     setFormEKartu('');
-    setFormEKartuFile(null);
-    setAdminError(null);
+    setFormEKartuDataUrl(null);
+    setFormEKartuMeta(null);
+    setModalError(null);
+  };
+
+  const openTambahModal = () => {
+    const defaultProg = selectedProgram
+      ? normalizeProgramLpkValue(selectedProgram.title)
+      : filterProgram !== 'ALL'
+        ? filterProgram
+        : '';
+    resetFormState(defaultProg);
     setFormOpen(true);
   };
 
   const openEditModal = (record: PemegangSertifikatRow) => {
     setEditingId(record.id);
-    setFormFoto(record.url_foto || '');
-    setFormFotoFile(null);
+    const currentPhoto = record.foto_url || record.url_foto || '';
+    const currentExpiry = record.tanggal_berakhir || record.berlaku_sampai || '2027-01-15';
+    setFormFoto(currentPhoto);
+    setFormFotoDataUrl(null);
+    setFormFotoMeta(null);
     setFormNama(record.nama_pemegang || '');
     setFormNik(record.nik || '');
     setFormProgramLpk(
@@ -1996,76 +2101,90 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     setFormNoSertifikat(record.no_sertifikat_bnsp || '');
     setFormNoRegister(record.no_register_bnsp || '');
     setFormTanggalTerbit(record.tanggal_terbit || '2024-01-15');
-    setFormBerlakuSampai(record.berlaku_sampai || '2027-01-15');
+    setFormTanggalBerakhir(currentExpiry);
     setFormStatus(record.status_sertifikat || 'VALID AKTIF');
     setFormEKartu(record.url_e_kartu || '');
-    setFormEKartuFile(null);
-    setAdminError(null);
+    setFormEKartuDataUrl(null);
+    setFormEKartuMeta(null);
+    setModalError(null);
     setFormOpen(true);
   };
 
-  const handleUploadFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setFormFotoFile(file);
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setFormFoto(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setModalError(null);
+    if (!file.type.startsWith('image/')) {
+      setModalError('Upload foto gagal: File harus berupa gambar (JPG, PNG, WEBP).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setModalError('Upload foto gagal: Ukuran file maksimal 5 MB.');
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setFormFoto(dataUrl);
+      setFormFotoDataUrl(dataUrl);
+      setFormFotoMeta({ name: file.name, type: file.type });
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : 'Gagal membaca file foto.');
+    }
   };
 
-  const handleUploadEKartu = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadEKartu = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setFormEKartuFile(file);
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setFormEKartu(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    setModalError(null);
+    if (!file.type.startsWith('image/')) {
+      setModalError('Upload E-Kartu gagal: File harus berupa gambar.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setModalError('Upload E-Kartu gagal: Ukuran file maksimal 5 MB.');
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setFormEKartu(dataUrl);
+      setFormEKartuDataUrl(dataUrl);
+      setFormEKartuMeta({ name: file.name, type: file.type });
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : 'Gagal membaca file E-Kartu.');
+    }
   };
 
   const handleGenerateAutoEKartu = async () => {
-    if (!selectedProgram) return;
     setGeneratingCard(true);
-    setAdminError(null);
+    setModalError(null);
     try {
       const cleanedNama = formNama.trim().toUpperCase() || 'PEMEGANG SERTIFIKAT';
       const cleanedNik = formNik.trim() || '0000000000000000';
       const cleanedProgram =
-        normalizeProgramLpkValue(formProgramLpk) || normalizeProgramLpkValue(selectedProgram.title);
+        normalizeProgramLpkValue(formProgramLpk) ||
+        (selectedProgram ? normalizeProgramLpkValue(selectedProgram.title) : 'PROGRAM SERTIFIKASI');
       const resolvedJenisData =
-        cleanedProgram === 'Teknologi Informasi'
-          ? 'pem-indonesia::Teknologi Informasi'
-          : cleanedProgram === normalizeProgramLpkValue(selectedProgram.title)
-            ? selectedProgram.key
-            : resolveProgramKeyFromJenis(cleanedProgram) || selectedProgram.key;
-      const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
-      const cleanedNoRegister = formNoRegister.trim() || '-';
+        resolveProgramKeyFromJenis(cleanedProgram) || selectedProgram?.key || null;
 
       const generated = await generateEKartuWithQR({
         nama_pemegang: cleanedNama,
         nik: cleanedNik,
         program_lpk: cleanedProgram,
-        no_sertifikat_bnsp: cleanedNoSertifikat,
-        no_register_bnsp: cleanedNoRegister,
+        no_sertifikat_bnsp: formNoSertifikat.trim() || '-',
+        no_register_bnsp: formNoRegister.trim() || '-',
         tanggal_terbit: formTanggalTerbit,
-        berlaku_sampai: formBerlakuSampai,
+        berlaku_sampai: formTanggalBerakhir,
         status_sertifikat: formStatus,
         url_foto: formFoto,
         jenis_data: resolvedJenisData,
       });
 
       setFormEKartu(generated.dataUrl);
-      setFormEKartuFile(generated.blob);
+      setFormEKartuDataUrl(generated.dataUrl);
+      setFormEKartuMeta({ name: `ekartu-${cleanedNik}.png`, type: 'image/png' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gagal generate E-Kartu otomatis.';
-      setAdminError(message);
+      setModalError(message);
     } finally {
       setGeneratingCard(false);
     }
@@ -2073,101 +2192,134 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
 
   const handleSaveRecord = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProgram) return;
-
     setSaving(true);
+    setModalError(null);
     setAdminError(null);
     setAdminNotice(null);
 
     try {
-      const cleanedNama = formNama.trim().toUpperCase() || 'TANPA NAMA';
-      const cleanedNik = formNik.trim() || '000000000000';
+      const cleanedNama = formNama.trim().toUpperCase();
+      const cleanedNik = formNik.trim();
       const cleanedProgram =
-        normalizeProgramLpkValue(formProgramLpk) || normalizeProgramLpkValue(selectedProgram.title);
+        normalizeProgramLpkValue(formProgramLpk) ||
+        (selectedProgram ? normalizeProgramLpkValue(selectedProgram.title) : '');
+      const cleanedNoSertifikat = formNoSertifikat.trim();
+      const cleanedNoRegister = formNoRegister.trim();
+
+      if (!cleanedNama || !cleanedNik || !cleanedProgram || !cleanedNoSertifikat || !cleanedNoRegister) {
+        throw new Error('Semua kolom wajib diisi sebelum menyimpan data.');
+      }
+
+      // Validasi client-side duplikat NIK dalam 1 program_lpk yang sama (server juga memvalidasi ulang)
+      const duplicateLocal = records.find(
+        (r) =>
+          String(r.id) !== String(editingId ?? '') &&
+          (r.nik || '').trim() === cleanedNik &&
+          (r.program_lpk || '').trim().toLowerCase() === cleanedProgram.toLowerCase()
+      );
+      if (duplicateLocal) {
+        throw new Error(
+          `NIK ${cleanedNik} sudah terdaftar pada program ${cleanedProgram}. NIK tidak boleh duplikat dalam 1 program_lpk yang sama.`
+        );
+      }
+
       const resolvedJenisData =
         cleanedProgram === 'Teknologi Informasi'
           ? 'pem-indonesia::Teknologi Informasi'
-          : cleanedProgram === normalizeProgramLpkValue(selectedProgram.title)
-            ? selectedProgram.key
-            : resolveProgramKeyFromJenis(cleanedProgram) || selectedProgram.key;
-      const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
-      const cleanedNoRegister = formNoRegister.trim() || '-';
+          : resolveProgramKeyFromJenis(cleanedProgram) || selectedProgram?.key || null;
 
-      // 1. Upload foto to Supabase Storage bucket 'files' if user selected a new file
-      let finalFotoUrl = formFoto.startsWith('http') ? formFoto : '';
-      if (formFotoFile) {
-        finalFotoUrl = await uploadFileToSupabaseBucket(formFotoFile, 'foto', cleanedNik);
+      let eKartuPayloadDataUrl = formEKartuDataUrl;
+      let eKartuPayloadMeta = formEKartuMeta;
+
+      if (!eKartuPayloadDataUrl && !formEKartu.startsWith('http')) {
+        try {
+          const autoCard = await generateEKartuWithQR({
+            nama_pemegang: cleanedNama,
+            nik: cleanedNik,
+            program_lpk: cleanedProgram,
+            no_sertifikat_bnsp: cleanedNoSertifikat,
+            no_register_bnsp: cleanedNoRegister,
+            tanggal_terbit: formTanggalTerbit,
+            berlaku_sampai: formTanggalBerakhir,
+            status_sertifikat: formStatus,
+            url_foto: formFoto,
+            jenis_data: resolvedJenisData,
+          });
+          eKartuPayloadDataUrl = autoCard.dataUrl;
+          eKartuPayloadMeta = { name: `ekartu-${cleanedNik}.png`, type: 'image/png' };
+        } catch {
+          // Lanjutkan simpan walau auto-generate E-Kartu gagal
+        }
       }
 
-      // 2. Upload manual E-Kartu OR auto-generate E-Kartu + QR if none uploaded
-      let finalEKartuUrl = formEKartu.startsWith('http') ? formEKartu : '';
-      if (formEKartuFile) {
-        finalEKartuUrl = await uploadFileToSupabaseBucket(formEKartuFile, 'ekartu', cleanedNik);
-      } else if (!finalEKartuUrl) {
-        const autoCard = await generateEKartuWithQR({
-          nama_pemegang: cleanedNama,
-          nik: cleanedNik,
-          program_lpk: cleanedProgram,
-          no_sertifikat_bnsp: cleanedNoSertifikat,
-          no_register_bnsp: cleanedNoRegister,
-          tanggal_terbit: formTanggalTerbit,
-          berlaku_sampai: formBerlakuSampai,
-          status_sertifikat: formStatus,
-          url_foto: finalFotoUrl || formFoto,
-          jenis_data: resolvedJenisData,
-        });
-        finalEKartuUrl = await uploadFileToSupabaseBucket(autoCard.blob, 'ekartu', cleanedNik);
-      }
-
-      const payload = {
-        jenis_data: resolvedJenisData,
+      const requestBody = {
         nama_pemegang: cleanedNama,
         nik: cleanedNik,
         program_lpk: cleanedProgram,
         no_sertifikat_bnsp: cleanedNoSertifikat,
         no_register_bnsp: cleanedNoRegister,
         tanggal_terbit: formTanggalTerbit,
-        berlaku_sampai: formBerlakuSampai,
+        tanggal_berakhir: formTanggalBerakhir,
+        berlaku_sampai: formTanggalBerakhir,
         status_sertifikat: formStatus,
-        url_foto: finalFotoUrl || null,
-        url_e_kartu: finalEKartuUrl || null,
+        jenis_data: resolvedJenisData,
+        foto_url: formFoto.startsWith('http') ? formFoto : null,
+        url_e_kartu: formEKartu.startsWith('http') ? formEKartu : null,
+        ...(formFotoDataUrl
+          ? {
+              fotoBase64: formFotoDataUrl,
+              fotoFileName: formFotoMeta?.name || `foto-${cleanedNik}.png`,
+              fotoContentType: formFotoMeta?.type || 'image/png',
+            }
+          : {}),
+        ...(eKartuPayloadDataUrl
+          ? {
+              eKartuBase64: eKartuPayloadDataUrl,
+              eKartuFileName: eKartuPayloadMeta?.name || `ekartu-${cleanedNik}.png`,
+              eKartuContentType: eKartuPayloadMeta?.type || 'image/png',
+            }
+          : {}),
       };
 
-      if (editingId !== null) {
-        const { data: updatedRow, error } = await supabase
-          .from('data_pemegang')
-          .update(payload)
-          .eq('id', editingId)
-          .select()
-          .single();
+      const isEdit = editingId !== null;
+      const endpoint = isEdit ? `/api/admin/pemegang/${editingId}` : '/api/admin/pemegang';
+      const method = isEdit ? 'PUT' : 'POST';
 
-        if (error) {
-          throw new Error(error.message);
-        }
+      const res = await fetch(endpoint, {
+        method,
+        headers: getAuthHeaders(),
+        body: JSON.stringify(requestBody),
+      });
 
-        const saved = updatedRow as PemegangSertifikatRow;
-        setRecords((prev) => prev.map((r) => (r.id === editingId ? saved : r)));
-        setAdminNotice(`Data ${cleanedNama} berhasil diperbarui di Supabase.`);
-      } else {
-        const { data: insertedRow, error } = await supabase
-          .from('data_pemegang')
-          .insert([payload])
-          .select()
-          .single();
-
-        if (error) {
-          throw new Error(error.message);
-        }
-
-        const saved = insertedRow as PemegangSertifikatRow;
-        setRecords((prev) => [saved, ...prev]);
-        setAdminNotice(`Data ${cleanedNama} & E-Kartu QR berhasil disimpan ke Supabase.`);
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
       }
 
+      const json = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        data?: PemegangSertifikatRow;
+        error?: string;
+      };
+
+      if (!res.ok || !json.data) {
+        throw new Error(json.error || 'Gagal menyimpan data ke Supabase.');
+      }
+
+      const savedRow = json.data;
+      if (isEdit) {
+        setRecords((prev) => prev.map((r) => (r.id === editingId ? savedRow : r)));
+        setAdminNotice(`Berhasil: Data ${cleanedNama} berhasil diperbarui.`);
+      } else {
+        setRecords((prev) => [savedRow, ...prev]);
+        setAdminNotice(`Berhasil: Data ${cleanedNama} berhasil ditambahkan.`);
+      }
+
+      setStorageWarning(null);
       setFormOpen(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gagal menyimpan data ke Supabase.';
-      setAdminError(message);
+      setModalError(message);
     } finally {
       setSaving(false);
     }
@@ -2178,13 +2330,28 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     setAdminError(null);
     setAdminNotice(null);
     try {
-      const { error } = await supabase.from('data_pemegang').delete().eq('id', id);
-      if (error) {
-        throw new Error(error.message);
+      const res = await fetch(`/api/admin/pemegang/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+
+      if (res.status === 401) {
+        handleUnauthorized();
+        return;
       }
+
+      const json = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        error?: string;
+      };
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Gagal menghapus data di Supabase.');
+      }
+
       setRecords((prev) => prev.filter((row) => row.id !== id));
       setConfirmDeleteId(null);
-      setAdminNotice('Data pemegang berhasil dihapus dari Supabase.');
+      setAdminNotice('Berhasil: Data pemegang dan file foto berhasil dihapus.');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gagal menghapus data di Supabase.';
       setAdminError(message);
@@ -2193,7 +2360,177 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     }
   };
 
-  const activeRecords = selectedProgram ? dataByProgram[selectedProgram.key] ?? [] : [];
+  const allProgramOptions = ADMIN_PROGRAM_GROUPS.flatMap((g) =>
+    g.items.map((item) => ({
+      key: item.key,
+      lembaga: g.lembaga,
+      title: item.title,
+      value: normalizeProgramLpkValue(item.title),
+    }))
+  );
+
+  const visibleRecords = (() => {
+    let base = selectedProgram ? dataByProgram[selectedProgram.key] ?? [] : records;
+    if (!selectedProgram && filterProgram !== 'ALL') {
+      base = base.filter(
+        (r) => (r.program_lpk || '').trim().toLowerCase() === filterProgram.toLowerCase()
+      );
+    }
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      base = base.filter(
+        (r) =>
+          (r.nama_pemegang || '').toLowerCase().includes(q) ||
+          (r.nik || '').toLowerCase().includes(q) ||
+          (r.no_sertifikat_bnsp || '').toLowerCase().includes(q) ||
+          (r.no_register_bnsp || '').toLowerCase().includes(q) ||
+          (r.program_lpk || '').toLowerCase().includes(q)
+      );
+    }
+    return base;
+  })();
+
+  const renderDataTable = (rows: PemegangSertifikatRow[]) => (
+    <div className="rounded-[16px] border border-slate-800 bg-[#111827] overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse min-w-[740px]">
+          <thead>
+            <tr className="bg-[#182132] border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-[0.06em] text-slate-400">
+              <th className="py-2.5 px-3">Foto</th>
+              <th className="py-2.5 px-2.5">Nama / NIK</th>
+              <th className="py-2.5 px-2.5">Program &amp; BNSP</th>
+              <th className="py-2.5 px-2.5">Terbit &amp; Berakhir</th>
+              <th className="py-2.5 px-2.5">Status</th>
+              <th className="py-2.5 px-2.5">E-Kartu</th>
+              <th className="py-2.5 px-3 text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/80 text-[12px]">
+            {loadingData ? (
+              <tr>
+                <td colSpan={7} className="py-8 px-4 text-center text-slate-400">
+                  Memuat data dari Supabase...
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="py-8 px-4 text-center text-slate-500">
+                  Belum ada data di Supabase. Klik tombol + TAMBAH untuk menambahkan data.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => {
+                const fotoSrc = row.foto_url || row.url_foto;
+                const expiryVal = row.tanggal_berakhir || row.berlaku_sampai;
+                return (
+                  <tr key={row.id} className="hover:bg-slate-800/30">
+                    <td className="py-3 px-3 align-middle">
+                      {fotoSrc ? (
+                        <img
+                          src={fotoSrc}
+                          alt={row.nama_pemegang || 'Foto'}
+                          className="w-10 h-12 rounded-[8px] object-cover border border-amber-500/60"
+                        />
+                      ) : (
+                        <div className="w-10 h-12 rounded-[8px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400">
+                          FOTO
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 px-2.5 align-middle">
+                      <div className="font-bold text-white leading-tight">
+                        {row.nama_pemegang || '-'}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                        {row.nik || '-'}
+                      </div>
+                    </td>
+                    <td className="py-3 px-2.5 align-middle">
+                      <div className="text-[11px] font-bold text-slate-200 leading-tight">
+                        {row.program_lpk || '-'}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
+                        {row.no_sertifikat_bnsp || '-'}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">
+                        {row.no_register_bnsp || '-'}
+                      </div>
+                    </td>
+                    <td className="py-3 px-2.5 align-middle text-[10.5px] text-slate-300 font-mono">
+                      <div>Terbit: {row.tanggal_terbit || '-'}</div>
+                      <div className="text-slate-400">Exp: {expiryVal || '-'}</div>
+                    </td>
+                    <td className="py-3 px-2.5 align-middle">
+                      <span
+                        className={`inline-block rounded-full px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-[0.04em] ${
+                          (row.status_sertifikat || 'VALID AKTIF').toUpperCase() === 'VALID AKTIF'
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                        }`}
+                      >
+                        {row.status_sertifikat || 'VALID AKTIF'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-2.5 align-middle">
+                      {row.url_e_kartu ? (
+                        <img
+                          src={row.url_e_kartu}
+                          alt={`E-Kartu ${row.nama_pemegang || ''}`}
+                          className="w-16 h-10 rounded-[6px] object-cover border border-amber-500/60"
+                        />
+                      ) : (
+                        <div className="w-16 h-10 rounded-[6px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[8.5px] font-bold text-slate-400">
+                          E-KARTU
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 align-middle text-right">
+                      {confirmDeleteId === row.id ? (
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={deletingId === row.id}
+                            onClick={() => void handleDeleteRecord(row.id)}
+                            className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-white cursor-pointer disabled:opacity-50"
+                          >
+                            {deletingId === row.id ? '...' : 'YA, HAPUS'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="rounded-lg bg-slate-700 px-2 py-1.5 text-[10px] font-bold uppercase text-slate-200 cursor-pointer"
+                          >
+                            BATAL
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(row)}
+                            className="rounded-lg bg-amber-500/20 border border-amber-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-amber-300 cursor-pointer active:scale-95 transition-transform"
+                          >
+                            EDIT
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(row.id)}
+                            className="rounded-lg bg-rose-500/20 border border-rose-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-rose-300 cursor-pointer active:scale-95 transition-transform"
+                          >
+                            HAPUS
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen w-full bg-[#05070B] flex justify-center font-sans antialiased text-slate-100">
@@ -2205,7 +2542,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
               <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-emerald-400">
-                SUPER ADMIN • SUPABASE LIVE
+                SUPER ADMIN • LIVE API
               </span>
             </div>
             <h1 className="text-[18px] font-black tracking-[0.06em] uppercase text-white leading-tight">
@@ -2223,7 +2560,10 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
             </button>
             <button
               type="button"
-              onClick={onLogout}
+              onClick={() => {
+                sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+                onLogout();
+              }}
               className="rounded-[10px] bg-rose-600/90 border border-rose-500/60 px-3 py-2 text-[11px] font-extrabold uppercase tracking-[0.04em] text-white cursor-pointer active:scale-95 transition-transform"
             >
               LOGOUT
@@ -2232,6 +2572,15 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         </header>
 
         <main className="flex-1 px-3.5 py-4 space-y-3.5">
+          {storageWarning && (
+            <div className="rounded-[12px] bg-amber-950/80 border border-amber-600/70 px-3.5 py-2.5 text-[12px] text-amber-200">
+              <span className="font-extrabold uppercase tracking-[0.04em] block text-amber-300 text-[10.5px] mb-0.5">
+                PERHATIAN KONFIGURASI STORAGE
+              </span>
+              {storageWarning}
+            </div>
+          )}
+
           {adminError && (
             <div className="rounded-[12px] bg-rose-950/75 border border-rose-700/70 px-3.5 py-2.5 text-[12px] text-rose-200">
               {adminError}
@@ -2239,20 +2588,118 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
           )}
 
           {adminNotice && (
-            <div className="rounded-[12px] bg-emerald-950/75 border border-emerald-700/70 px-3.5 py-2.5 text-[12px] text-emerald-200">
-              {adminNotice}
+            <div className="rounded-[12px] bg-emerald-950/80 border border-emerald-500/60 px-3.5 py-2.5 text-[12px] font-bold text-emerald-200 flex items-center justify-between gap-2">
+              <span>{adminNotice}</span>
+              <button
+                type="button"
+                onClick={() => setAdminNotice(null)}
+                className="text-emerald-300 hover:text-white text-[12px] cursor-pointer"
+                aria-label="Tutup notifikasi"
+              >
+                ✕
+              </button>
             </div>
           )}
 
-          {!selectedProgram ? (
+          {!selectedProgram && (
+            <div className="grid grid-cols-2 gap-2 rounded-[14px] bg-[#111827] border border-slate-800 p-1.5">
+              <button
+                type="button"
+                onClick={() => setActiveTab('semua')}
+                className={`rounded-[10px] py-2 text-[11.5px] font-extrabold uppercase tracking-[0.04em] transition-colors cursor-pointer ${
+                  activeTab === 'semua'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                DATA PEMEGANG ({records.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('program')}
+                className={`rounded-[10px] py-2 text-[11.5px] font-extrabold uppercase tracking-[0.04em] transition-colors cursor-pointer ${
+                  activeTab === 'program'
+                    ? 'bg-amber-400 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                PER SKEMA / LPK
+              </button>
+            </div>
+          )}
+
+          {!selectedProgram && activeTab === 'semua' ? (
+            <div className="space-y-3.5">
+              {/* Top Action & Filter Card */}
+              <div className="rounded-[16px] bg-[#111827] border border-slate-800 p-3.5 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.06em] text-emerald-400">
+                      TABEL LIVE: data_pemegang
+                    </div>
+                    <h2 className="text-[15px] font-extrabold text-white leading-snug">
+                      Kelola Semua Pemegang Sertifikat
+                    </h2>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void checkStorageStatus();
+                        void fetchAllRecords();
+                      }}
+                      disabled={loadingData}
+                      className="rounded-[10px] bg-slate-800 border border-slate-700 px-2.5 py-2 text-[10.5px] font-bold uppercase text-amber-400 cursor-pointer disabled:opacity-50"
+                    >
+                      {loadingData ? '...' : 'SYNC'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openTambahModal}
+                      className="rounded-[10px] bg-emerald-500 border-b-[3px] border-b-emerald-700 px-3.5 py-2 text-[11.5px] font-extrabold uppercase tracking-[0.05em] text-slate-950 cursor-pointer active:translate-y-[1px] transition-all"
+                    >
+                      + TAMBAH
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Cari nama, NIK, no sertifikat, atau register..."
+                    className="w-full rounded-[10px] bg-[#161E2E] border border-slate-700 px-3 py-2 text-[12.5px] text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
+                  />
+                  <select
+                    value={filterProgram}
+                    onChange={(e) => setFilterProgram(e.target.value)}
+                    className="w-full rounded-[10px] bg-[#161E2E] border border-slate-700 px-3 py-2 text-[12px] text-slate-200 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="ALL">Semua Program LPK ({records.length} data)</option>
+                    {allProgramOptions.map((opt) => (
+                      <option key={opt.key} value={opt.value}>
+                        {opt.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {renderDataTable(visibleRecords)}
+            </div>
+          ) : !selectedProgram ? (
             <div className="space-y-5">
               <div className="rounded-[16px] bg-[#111827] border border-slate-800 p-4 flex items-center justify-between gap-3">
                 <p className="text-[12px] text-slate-400 leading-relaxed">
-                  Pilih jenis sertifikat untuk kelola data pemegang (Supabase + Upload Foto + Auto E-Kartu QR).
+                  Pilih skema/program untuk kelola data pemegang per lembaga.
                 </p>
                 <button
                   type="button"
-                  onClick={() => void fetchAllRecords()}
+                  onClick={() => {
+                    void checkStorageStatus();
+                    void fetchAllRecords();
+                  }}
                   disabled={loadingData}
                   className="shrink-0 rounded-lg bg-slate-800 border border-slate-700 px-2.5 py-1.5 text-[10.5px] font-bold uppercase text-amber-400 cursor-pointer disabled:opacity-50"
                 >
@@ -2348,142 +2795,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                 </div>
               </div>
 
-              {/* Supabase Live Data Table */}
-              <div className="rounded-[16px] border border-slate-800 bg-[#111827] overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse min-w-[680px]">
-                    <thead>
-                      <tr className="bg-[#182132] border-b border-slate-800 text-[10px] font-extrabold uppercase tracking-[0.06em] text-slate-400">
-                        <th className="py-2.5 px-3">Foto</th>
-                        <th className="py-2.5 px-2.5">Nama / NIK</th>
-                        <th className="py-2.5 px-2.5">Program &amp; BNSP</th>
-                        <th className="py-2.5 px-2.5">Masa Berlaku</th>
-                        <th className="py-2.5 px-2.5">Status</th>
-                        <th className="py-2.5 px-2.5">E-Kartu</th>
-                        <th className="py-2.5 px-3 text-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/80 text-[12px]">
-                      {loadingData ? (
-                        <tr>
-                          <td colSpan={7} className="py-8 px-4 text-center text-slate-400">
-                            Memuat data dari Supabase...
-                          </td>
-                        </tr>
-                      ) : activeRecords.length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="py-8 px-4 text-center text-slate-500">
-                            Belum ada data di Supabase. Klik tombol + TAMBAH untuk menambahkan data.
-                          </td>
-                        </tr>
-                      ) : (
-                        activeRecords.map((row) => (
-                          <tr key={row.id} className="hover:bg-slate-800/30">
-                            <td className="py-3 px-3 align-middle">
-                              {row.url_foto ? (
-                                <img
-                                  src={row.url_foto}
-                                  alt={row.nama_pemegang || 'Foto'}
-                                  className="w-10 h-12 rounded-[8px] object-cover border border-amber-500/60"
-                                />
-                              ) : (
-                                <div className="w-10 h-12 rounded-[8px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] font-bold text-slate-400">
-                                  FOTO
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-3 px-2.5 align-middle">
-                              <div className="font-bold text-white leading-tight">
-                                {row.nama_pemegang || '-'}
-                              </div>
-                              <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
-                                {row.nik || '-'}
-                              </div>
-                            </td>
-                            <td className="py-3 px-2.5 align-middle">
-                              <div className="text-[11px] font-bold text-slate-200 leading-tight">
-                                {row.program_lpk || '-'}
-                              </div>
-                              <div className="text-[10px] text-slate-400 mt-0.5 font-mono">
-                                {row.no_sertifikat_bnsp || '-'}
-                              </div>
-                              <div className="text-[10px] text-slate-500 font-mono">
-                                {row.no_register_bnsp || '-'}
-                              </div>
-                            </td>
-                            <td className="py-3 px-2.5 align-middle text-[10.5px] text-slate-300 font-mono">
-                              <div>Terbit: {row.tanggal_terbit || '-'}</div>
-                              <div className="text-slate-400">Exp: {row.berlaku_sampai || '-'}</div>
-                            </td>
-                            <td className="py-3 px-2.5 align-middle">
-                              <span
-                                className={`inline-block rounded-full px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-[0.04em] ${
-                                  (row.status_sertifikat || '').toUpperCase() === 'VALID AKTIF'
-                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                                }`}
-                              >
-                                {row.status_sertifikat || 'VALID AKTIF'}
-                              </span>
-                            </td>
-                            <td className="py-3 px-2.5 align-middle">
-                              {row.url_e_kartu ? (
-                                <img
-                                  src={row.url_e_kartu}
-                                  alt={`E-Kartu ${row.nama_pemegang || ''}`}
-                                  className="w-16 h-10 rounded-[6px] object-cover border border-amber-500/60"
-                                />
-                              ) : (
-                                <div className="w-16 h-10 rounded-[6px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[8.5px] font-bold text-slate-400">
-                                  E-KARTU
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-3 px-3 align-middle text-right">
-                              {confirmDeleteId === row.id ? (
-                                <div className="inline-flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    disabled={deletingId === row.id}
-                                    onClick={() => void handleDeleteRecord(row.id)}
-                                    className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-white cursor-pointer disabled:opacity-50"
-                                  >
-                                    {deletingId === row.id ? '...' : 'YA, HAPUS'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteId(null)}
-                                    className="rounded-lg bg-slate-700 px-2 py-1.5 text-[10px] font-bold uppercase text-slate-200 cursor-pointer"
-                                  >
-                                    BATAL
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="inline-flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditModal(row)}
-                                    className="rounded-lg bg-amber-500/20 border border-amber-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-amber-300 cursor-pointer active:scale-95 transition-transform"
-                                  >
-                                    EDIT
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteId(row.id)}
-                                    className="rounded-lg bg-rose-500/20 border border-rose-500/40 px-2.5 py-1.5 text-[10px] font-extrabold uppercase text-rose-300 cursor-pointer active:scale-95 transition-transform"
-                                  >
-                                    HAPUS
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {renderDataTable(visibleRecords)}
             </div>
           )}
         </main>
@@ -2507,24 +2819,24 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
               </div>
 
               <form onSubmit={handleSaveRecord} className="mt-4 space-y-3.5">
-                {adminError && (
-                  <div className="rounded-[10px] bg-rose-950/80 border border-rose-700/80 px-3 py-2 text-[11.5px] text-rose-200">
-                    {adminError}
+                {modalError && (
+                  <div className="rounded-[10px] bg-rose-950/85 border border-rose-600/80 px-3 py-2.5 text-[11.5px] font-semibold text-rose-200">
+                    {modalError}
                   </div>
                 )}
 
                 {/* 1. UPLOAD FOTO */}
                 <div>
                   <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
-                    UPLOAD FOTO
+                    UPLOAD FOTO (BUCKET: files)
                   </label>
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={handleUploadFoto}
+                    onChange={(e) => void handleUploadFoto(e)}
                     className="w-full text-[11.5px] text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:text-white hover:file:bg-slate-600 cursor-pointer"
                   />
-                  <div className="mt-2">
+                  <div className="mt-2 flex items-center gap-3">
                     {formFoto ? (
                       <img
                         src={formFoto}
@@ -2535,6 +2847,11 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                       <div className="w-[74px] h-[92px] rounded-[10px] bg-slate-800 border border-slate-700 flex items-center justify-center text-[9.5px] font-bold text-slate-400">
                         NO FOTO
                       </div>
+                    )}
+                    {editingId !== null && formFotoDataUrl && (
+                      <span className="text-[10.5px] text-amber-300 leading-snug">
+                        Foto lama di bucket akan otomatis dihapus dan diganti foto baru saat disimpan.
+                      </span>
                     )}
                   </div>
                 </div>
@@ -2573,7 +2890,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                 {/* 4. PROGRAM / JURUSAN (PROGRAM LPK) */}
                 <div>
                   <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
-                    PROGRAM / JURUSAN
+                    PROGRAM LPK / JURUSAN
                   </label>
                   <select
                     required
@@ -2649,16 +2966,16 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                   />
                 </div>
 
-                {/* 8. BERLAKU SAMPAI */}
+                {/* 8. TANGGAL BERAKHIR */}
                 <div>
                   <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
-                    BERLAKU SAMPAI
+                    TANGGAL BERAKHIR (BERLAKU SAMPAI)
                   </label>
                   <input
                     type="date"
                     required
-                    value={formBerlakuSampai}
-                    onChange={(e) => setFormBerlakuSampai(e.target.value)}
+                    value={formTanggalBerakhir}
+                    onChange={(e) => setFormTanggalBerakhir(e.target.value)}
                     className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500 [color-scheme:dark]"
                   />
                 </div>
@@ -2696,7 +3013,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={handleUploadEKartu}
+                    onChange={(e) => void handleUploadEKartu(e)}
                     className="w-full text-[11.5px] text-slate-300 file:mr-2.5 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:text-white hover:file:bg-slate-600 cursor-pointer"
                   />
                   <div className="mt-2">
