@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
 import express, { type NextFunction, type Request, type Response } from 'express';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -89,6 +88,23 @@ function getServiceRoleKey(): string {
     process.env.SUPABASE_SECRET_KEY ||
     ''
   ).trim();
+}
+
+function getAnonKey(): string {
+  return (
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    'sb_publishable_4iOdbJUqzRZ-mVSALQwlAw_Oe5LLU1d'
+  ).trim();
+}
+
+function getSupabaseAnonClient(): SupabaseClient {
+  return createClient(getSupabaseUrl(), getAnonKey(), {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 }
 
 function getSupabaseAdminClient(): SupabaseClient {
@@ -349,55 +365,37 @@ async function removeStorageFilesByUrls(
   }
 }
 
-function getTokenSecret(): string {
-  return (
-    process.env.ADMIN_SESSION_SECRET ||
-    getServiceRoleKey() ||
-    'apik-super-admin-local-secret-key'
-  );
-}
-
-function signAdminToken(username: string): string {
-  const payload = Buffer.from(
-    JSON.stringify({
-      sub: username,
-      role: 'super_admin',
-      exp: Date.now() + 24 * 60 * 60 * 1000,
-    })
-  ).toString('base64url');
-  const sig = crypto.createHmac('sha256', getTokenSecret()).update(payload).digest('base64url');
-  return `${payload}.${sig}`;
-}
-
-function verifyAdminToken(token: string): boolean {
-  const parts = token.split('.');
-  if (parts.length !== 2) return false;
-  const [payload, sig] = parts;
-  const expected = crypto.createHmac('sha256', getTokenSecret()).update(payload).digest('base64url');
-  const sigBuf = Buffer.from(sig);
-  const expBuf = Buffer.from(expected);
-  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
-    return false;
-  }
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
-      exp?: number;
-      role?: string;
-    };
-    return parsed.role === 'super_admin' && typeof parsed.exp === 'number' && parsed.exp > Date.now();
-  } catch {
-    return false;
-  }
-}
-
-function requireAdminAuth(req: Request, res: Response, next: NextFunction): void {
+async function requireAdminAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  if (!token || !verifyAdminToken(token)) {
-    res.status(401).json({ error: 'Sesi admin tidak valid atau telah berakhir. Silakan login kembali.' });
+  if (!token) {
+    res.status(401).json({ error: 'Gagal: Sesi admin tidak valid. Silakan login kembali.' });
     return;
   }
-  next();
+
+  try {
+    const authClient = getServiceRoleKey() ? getSupabaseAdminClient() : getSupabaseAnonClient();
+    const { data, error } = await authClient.auth.getUser(token);
+    if (error || !data?.user) {
+      if (error && isServiceKeyOrPermissionError(error) && getServiceRoleKey()) {
+        res.status(403).json({ error: SERVICE_KEY_ERROR_MSG });
+        return;
+      }
+      res.status(401).json({ error: 'Gagal: Sesi admin telah berakhir. Silakan login kembali.' });
+      return;
+    }
+
+    const email = (data.user.email || '').toLowerCase();
+    if (email !== 'admin@lpk.local') {
+      res.status(403).json({ error: 'Gagal: Akun ini tidak memiliki akses Super Admin.' });
+      return;
+    }
+
+    next();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Gagal memverifikasi sesi admin.';
+    res.status(500).json({ error: message });
+  }
 }
 
 function buildDbWritePayload(
@@ -548,18 +546,66 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '20mb' }));
 
-  app.post('/api/admin/login', (req: Request, res: Response) => {
-    const body = (req.body || {}) as { username?: string; password?: string };
-    const expectedUser = process.env.ADMIN_USERNAME || 'admin';
-    const expectedPass = process.env.ADMIN_PASSWORD || 'Microsoft';
+  app.post('/api/admin/ensure-user', async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as { email?: string; password?: string };
+      const email = (body.email || '').trim().toLowerCase();
+      const password = body.password || '';
+      const expectedPass = process.env.ADMIN_PASSWORD || 'Microsoft';
 
-    if (body.username === expectedUser && body.password === expectedPass) {
-      const token = signAdminToken(expectedUser);
-      res.json({ ok: true, token });
-      return;
+      if (email !== 'admin@lpk.local' || password !== expectedPass) {
+        res.status(401).json({ error: 'Gagal: Username atau password tidak valid.' });
+        return;
+      }
+
+      const supabaseAdmin = getSupabaseAdminClient();
+      const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 200,
+      });
+
+      if (listErr) {
+        if (isServiceKeyOrPermissionError(listErr)) {
+          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
+        }
+        throw new HttpError(500, `Gagal memeriksa user admin: ${listErr.message}`);
+      }
+
+      const existingUser = (listData?.users ?? []).find(
+        (u) => (u.email || '').toLowerCase() === 'admin@lpk.local'
+      );
+
+      if (!existingUser) {
+        const { error: createErr } = await supabaseAdmin.auth.admin.createUser({
+          email: 'admin@lpk.local',
+          password: expectedPass,
+          email_confirm: true,
+          user_metadata: { role: 'super_admin' },
+        });
+
+        if (createErr) {
+          if (isServiceKeyOrPermissionError(createErr)) {
+            throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
+          }
+          throw new HttpError(500, `Gagal membuat user admin@lpk.local: ${createErr.message}`);
+        }
+
+        res.status(201).json({ ok: true, created: true });
+        return;
+      }
+
+      if (!existingUser.email_confirmed_at) {
+        await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
+          email_confirm: true,
+        });
+      }
+
+      res.json({ ok: true, existed: true });
+    } catch (err) {
+      const status = err instanceof HttpError ? err.status : 500;
+      const message = err instanceof Error ? err.message : 'Gagal menyiapkan akun admin.';
+      res.status(status).json({ error: message });
     }
-
-    res.status(401).json({ error: 'Username atau password tidak valid.' });
   });
 
   app.get('/api/admin/status', requireAdminAuth, async (_req: Request, res: Response) => {

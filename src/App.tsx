@@ -12,7 +12,7 @@ const SUPABASE_URL =
 const SUPABASE_ANON_KEY =
   import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_4iOdbJUqzRZ-mVSALQwlAw_Oe5LLU1d';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export interface PemegangSertifikatRow {
   id: string | number;
@@ -31,8 +31,6 @@ export interface PemegangSertifikatRow {
   url_e_kartu?: string | null;
   created_at?: string | null;
 }
-
-const ADMIN_TOKEN_STORAGE_KEY = 'apik_super_admin_token';
 
 function normalizePublicRow(raw: Record<string, unknown>): PemegangSertifikatRow {
   const expiry = (raw.tanggal_berakhir as string | null | undefined) ?? (raw.berlaku_sampai as string | null | undefined) ?? null;
@@ -1250,8 +1248,8 @@ export function HalamanVerifikasi({
             ? 'Teknologi Informasi'
             : namaProgram.toUpperCase();
 
-        // Publik read-only via Anon Key
-        const { data: exactRows, error } = await supabase
+        // Publik read-only via supabaseClient (Anon Key)
+        const { data: exactRows, error } = await supabaseClient
           .from('data_pemegang')
           .select('*')
           .eq('nik', inputNik)
@@ -1266,7 +1264,7 @@ export function HalamanVerifikasi({
 
         // Fallback case-insensitive untuk program_lpk
         if (rows.length === 0) {
-          const { data: ilikeRows, error: ilikeErr } = await supabase
+          const { data: ilikeRows, error: ilikeErr } = await supabaseClient
             .from('data_pemegang')
             .select('*')
             .eq('nik', inputNik)
@@ -1282,7 +1280,7 @@ export function HalamanVerifikasi({
 
         // Fallback jika dibuka dari QR scan tanpa parameter jenis
         if (rows.length === 0 && initialNik && !jenisData) {
-          const { data: nikRows, error: nikErr } = await supabase
+          const { data: nikRows, error: nikErr } = await supabaseClient
             .from('data_pemegang')
             .select('*')
             .eq('nik', inputNik)
@@ -1733,20 +1731,55 @@ export function LoginAdmin({ onClose, onSuccess }: LoginAdminProps) {
     setSubmitting(true);
     setError('');
     try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-      const json = (await res.json().catch(() => ({}))) as { token?: string; error?: string };
-      if (!res.ok || !json.token) {
-        setError(json.error || 'Username atau password tidak valid.');
+      const rawUsername = username.trim();
+      const loginEmail =
+        rawUsername.toLowerCase() === 'admin' ? 'admin@lpk.local' : rawUsername;
+
+      if (!loginEmail || !password) {
+        setError('Gagal: Username dan password wajib diisi.');
         return;
       }
-      sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, json.token);
+
+      // Login wajib menggunakan supabaseClient (VITE_SUPABASE_ANON_KEY)
+      let { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+        email: loginEmail,
+        password,
+      });
+
+      // Jika user admin@lpk.local belum ada, buatkan otomatis lewat server (supabaseAdmin) lalu login ulang
+      if ((authError || !authData.session) && loginEmail.toLowerCase() === 'admin@lpk.local') {
+        const ensureRes = await fetch('/api/admin/ensure-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: loginEmail, password }),
+        });
+
+        const ensureJson = (await ensureRes.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+        };
+
+        if (!ensureRes.ok) {
+          setError(ensureJson.error || 'Gagal: Username atau password tidak valid.');
+          return;
+        }
+
+        const retry = await supabaseClient.auth.signInWithPassword({
+          email: loginEmail,
+          password,
+        });
+        authData = retry.data;
+        authError = retry.error;
+      }
+
+      if (authError || !authData.session) {
+        setError('Gagal: Username atau password tidak valid.');
+        return;
+      }
+
       onSuccess();
     } catch {
-      setError('Gagal terhubung ke server admin. Pastikan server berjalan.');
+      setError('Gagal: Tidak dapat terhubung ke layanan autentikasi Supabase.');
     } finally {
       setSubmitting(false);
     }
@@ -1970,24 +2003,26 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
   const [formEKartuDataUrl, setFormEKartuDataUrl] = useState<string | null>(null);
   const [formEKartuMeta, setFormEKartuMeta] = useState<{ name: string; type: string } | null>(null);
 
-  const getAuthHeaders = useCallback((): Record<string, string> => {
-    const token = sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || '';
+  const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
+    const { data } = await supabaseClient.auth.getSession();
+    const token = data.session?.access_token || '';
     return {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
   }, []);
 
-  const handleUnauthorized = useCallback(() => {
-    sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+  const handleUnauthorized = useCallback(async () => {
+    await supabaseClient.auth.signOut().catch(() => {});
     onLogout();
   }, [onLogout]);
 
   const checkStorageStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/status', { headers: getAuthHeaders() });
+      const headers = await getAuthHeaders();
+      const res = await fetch('/api/admin/status', { headers });
       if (res.status === 401) {
-        handleUnauthorized();
+        await handleUnauthorized();
         return;
       }
       const json = (await res.json().catch(() => ({}))) as {
@@ -2000,7 +2035,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         setStorageWarning(null);
       }
     } catch {
-      setStorageWarning('Tidak dapat memeriksa status server Supabase Admin.');
+      setStorageWarning('Gagal: Tidak dapat memeriksa status server Supabase Admin.');
     }
   }, [getAuthHeaders, handleUnauthorized]);
 
@@ -2008,12 +2043,13 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     setLoadingData(true);
     setAdminError(null);
     try {
+      const headers = await getAuthHeaders();
       const res = await fetch('/api/admin/pemegang', {
-        headers: getAuthHeaders(),
+        headers,
       });
 
       if (res.status === 401) {
-        handleUnauthorized();
+        await handleUnauthorized();
         return;
       }
 
@@ -2028,8 +2064,8 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
 
       setRecords(json.data ?? []);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Gagal memuat data dari Supabase.';
-      setAdminError(message);
+      const rawMsg = err instanceof Error ? err.message : 'Gagal memuat data dari Supabase.';
+      setAdminError(rawMsg.startsWith('Gagal') ? rawMsg : `Gagal: ${rawMsg}`);
     } finally {
       setLoadingData(false);
     }
@@ -2285,14 +2321,15 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
       const endpoint = isEdit ? `/api/admin/pemegang/${editingId}` : '/api/admin/pemegang';
       const method = isEdit ? 'PUT' : 'POST';
 
+      const headers = await getAuthHeaders();
       const res = await fetch(endpoint, {
         method,
-        headers: getAuthHeaders(),
+        headers,
         body: JSON.stringify(requestBody),
       });
 
       if (res.status === 401) {
-        handleUnauthorized();
+        await handleUnauthorized();
         return;
       }
 
@@ -2318,8 +2355,8 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
       setStorageWarning(null);
       setFormOpen(false);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Gagal menyimpan data ke Supabase.';
-      setModalError(message);
+      const rawMsg = err instanceof Error ? err.message : 'Gagal menyimpan data ke Supabase.';
+      setModalError(rawMsg.startsWith('Gagal') ? rawMsg : `Gagal: ${rawMsg}`);
     } finally {
       setSaving(false);
     }
@@ -2330,13 +2367,14 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     setAdminError(null);
     setAdminNotice(null);
     try {
+      const headers = await getAuthHeaders();
       const res = await fetch(`/api/admin/pemegang/${id}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        headers,
       });
 
       if (res.status === 401) {
-        handleUnauthorized();
+        await handleUnauthorized();
         return;
       }
 
@@ -2353,8 +2391,8 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
       setConfirmDeleteId(null);
       setAdminNotice('Berhasil: Data pemegang dan file foto berhasil dihapus.');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Gagal menghapus data di Supabase.';
-      setAdminError(message);
+      const rawMsg = err instanceof Error ? err.message : 'Gagal menghapus data di Supabase.';
+      setAdminError(rawMsg.startsWith('Gagal') ? rawMsg : `Gagal: ${rawMsg}`);
     } finally {
       setDeletingId(null);
     }
@@ -2561,8 +2599,9 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
             <button
               type="button"
               onClick={() => {
-                sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
-                onLogout();
+                void supabaseClient.auth.signOut().finally(() => {
+                  onLogout();
+                });
               }}
               className="rounded-[10px] bg-rose-600/90 border border-rose-500/60 px-3 py-2 text-[11px] font-extrabold uppercase tracking-[0.04em] text-white cursor-pointer active:scale-95 transition-transform"
             >
