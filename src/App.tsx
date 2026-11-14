@@ -559,6 +559,7 @@ export function HalamanSetelahNov2022({
         { title: 'K3 Ruang Terbatas (Confined Space)', subtitle: 'Kualifikasi Khusus Paparan Risiko' },
         { title: 'Petugas Gas H2S', subtitle: 'Kualifikasi Deteksi Gas Berbahaya' },
         { title: 'Authorized Gas Tester', subtitle: 'Pengujian Gas Atmosfer Spesifik' },
+        { title: 'Teknologi Informasi', subtitle: 'Sertifikasi IT Komputer' },
         { title: 'Operator Excavator', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
         { title: 'Operator Backhoe', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
         { title: 'Operator Loader', subtitle: 'Vokasi Alat Berat Pesawat Angkat' },
@@ -1238,14 +1239,17 @@ export function HalamanVerifikasi({
       setQrCodeUrl('');
 
       try {
-        const programFilterUpper = namaProgram.toUpperCase();
+        const primaryProgramValue =
+          namaProgram.toLowerCase() === 'teknologi informasi'
+            ? 'Teknologi Informasi'
+            : namaProgram.toUpperCase();
 
         // Filter berdasarkan NIK dan program_lpk (1 NIK bisa memiliki banyak sertifikat di program berbeda)
         const { data: exactRows, error } = await supabase
           .from('data_pemegang')
           .select('*')
           .eq('nik', inputNik)
-          .eq('program_lpk', programFilterUpper)
+          .eq('program_lpk', primaryProgramValue)
           .order('id', { ascending: false });
 
         if (error) {
@@ -1828,6 +1832,7 @@ const ADMIN_PROGRAM_GROUPS: { lembaga: string; items: AdminProgramItem[] }[] = [
       { key: 'pem-indonesia::K3 Ruang Terbatas (Confined Space)', lembaga: 'PEM INDONESIA', title: 'K3 Ruang Terbatas (Confined Space)' },
       { key: 'pem-indonesia::Petugas Gas H2S', lembaga: 'PEM INDONESIA', title: 'Petugas Gas H2S' },
       { key: 'pem-indonesia::Authorized Gas Tester', lembaga: 'PEM INDONESIA', title: 'Authorized Gas Tester' },
+      { key: 'pem-indonesia::Teknologi Informasi', lembaga: 'PEM INDONESIA', title: 'Teknologi Informasi' },
       { key: 'pem-indonesia::Operator Excavator', lembaga: 'PEM INDONESIA', title: 'Operator Excavator' },
       { key: 'pem-indonesia::Operator Backhoe', lembaga: 'PEM INDONESIA', title: 'Operator Backhoe' },
       { key: 'pem-indonesia::Operator Loader', lembaga: 'PEM INDONESIA', title: 'Operator Loader' },
@@ -1875,6 +1880,15 @@ function resolveProgramKeyFromJenis(jenisData?: string | null): string | null {
     }
   }
   return null;
+}
+
+function normalizeProgramLpkValue(programTitle: string): string {
+  const trimmed = programTitle.trim();
+  if (!trimmed) return '';
+  if (trimmed.toLowerCase() === 'teknologi informasi') {
+    return 'Teknologi Informasi';
+  }
+  return trimmed.toUpperCase();
 }
 
 interface HalamanAdminDashboardProps {
@@ -1954,7 +1968,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     setFormFotoFile(null);
     setFormNama('');
     setFormNik('');
-    setFormProgramLpk(selectedProgram ? selectedProgram.title.toUpperCase() : '');
+    setFormProgramLpk(selectedProgram ? normalizeProgramLpkValue(selectedProgram.title) : '');
     setFormNoSertifikat('');
     setFormNoRegister('');
     setFormTanggalTerbit('2024-01-15');
@@ -1972,7 +1986,13 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     setFormFotoFile(null);
     setFormNama(record.nama_pemegang || '');
     setFormNik(record.nik || '');
-    setFormProgramLpk(record.program_lpk || (selectedProgram ? selectedProgram.title.toUpperCase() : ''));
+    setFormProgramLpk(
+      record.program_lpk
+        ? normalizeProgramLpkValue(record.program_lpk)
+        : selectedProgram
+          ? normalizeProgramLpkValue(selectedProgram.title)
+          : ''
+    );
     setFormNoSertifikat(record.no_sertifikat_bnsp || '');
     setFormNoRegister(record.no_register_bnsp || '');
     setFormTanggalTerbit(record.tanggal_terbit || '2024-01-15');
@@ -2017,7 +2037,14 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
     try {
       const cleanedNama = formNama.trim().toUpperCase() || 'PEMEGANG SERTIFIKAT';
       const cleanedNik = formNik.trim() || '0000000000000000';
-      const cleanedProgram = formProgramLpk.trim().toUpperCase() || selectedProgram.title.toUpperCase();
+      const cleanedProgram =
+        normalizeProgramLpkValue(formProgramLpk) || normalizeProgramLpkValue(selectedProgram.title);
+      const resolvedJenisData =
+        cleanedProgram === 'Teknologi Informasi'
+          ? 'pem-indonesia::Teknologi Informasi'
+          : cleanedProgram === normalizeProgramLpkValue(selectedProgram.title)
+            ? selectedProgram.key
+            : resolveProgramKeyFromJenis(cleanedProgram) || selectedProgram.key;
       const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
       const cleanedNoRegister = formNoRegister.trim() || '-';
 
@@ -2031,7 +2058,7 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         berlaku_sampai: formBerlakuSampai,
         status_sertifikat: formStatus,
         url_foto: formFoto,
-        jenis_data: selectedProgram.key,
+        jenis_data: resolvedJenisData,
       });
 
       setFormEKartu(generated.dataUrl);
@@ -2056,7 +2083,13 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
       const cleanedNama = formNama.trim().toUpperCase() || 'TANPA NAMA';
       const cleanedNik = formNik.trim() || '000000000000';
       const cleanedProgram =
-        formProgramLpk.trim().toUpperCase() || selectedProgram.title.toUpperCase();
+        normalizeProgramLpkValue(formProgramLpk) || normalizeProgramLpkValue(selectedProgram.title);
+      const resolvedJenisData =
+        cleanedProgram === 'Teknologi Informasi'
+          ? 'pem-indonesia::Teknologi Informasi'
+          : cleanedProgram === normalizeProgramLpkValue(selectedProgram.title)
+            ? selectedProgram.key
+            : resolveProgramKeyFromJenis(cleanedProgram) || selectedProgram.key;
       const cleanedNoSertifikat = formNoSertifikat.trim() || '-';
       const cleanedNoRegister = formNoRegister.trim() || '-';
 
@@ -2081,13 +2114,13 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
           berlaku_sampai: formBerlakuSampai,
           status_sertifikat: formStatus,
           url_foto: finalFotoUrl || formFoto,
-          jenis_data: selectedProgram.key,
+          jenis_data: resolvedJenisData,
         });
         finalEKartuUrl = await uploadFileToSupabaseBucket(autoCard.blob, 'ekartu', cleanedNik);
       }
 
       const payload = {
-        jenis_data: selectedProgram.key,
+        jenis_data: resolvedJenisData,
         nama_pemegang: cleanedNama,
         nik: cleanedNik,
         program_lpk: cleanedProgram,
@@ -2537,19 +2570,39 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
                   />
                 </div>
 
-                {/* 4. PROGRAM LPK */}
+                {/* 4. PROGRAM / JURUSAN (PROGRAM LPK) */}
                 <div>
                   <label className="block text-[11px] font-extrabold uppercase tracking-[0.05em] text-[#D92D34] mb-1.5">
-                    PROGRAM LPK
+                    PROGRAM / JURUSAN
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={formProgramLpk}
                     onChange={(e) => setFormProgramLpk(e.target.value)}
-                    placeholder="Contoh: OPERATOR SCAFFOLDING"
                     className="w-full rounded-[10px] bg-[#1A2234] border border-slate-700 px-3 py-2.5 text-[13.5px] text-white focus:outline-none focus:border-emerald-500"
-                  />
+                  >
+                    <option value="" disabled>
+                      Pilih Program / Jurusan
+                    </option>
+                    {formProgramLpk &&
+                      !ADMIN_PROGRAM_GROUPS.some((group) =>
+                        group.items.some(
+                          (item) => normalizeProgramLpkValue(item.title) === formProgramLpk
+                        )
+                      ) && <option value={formProgramLpk}>{formProgramLpk}</option>}
+                    {ADMIN_PROGRAM_GROUPS.map((group) => (
+                      <optgroup key={group.lembaga} label={group.lembaga}>
+                        {group.items.map((item) => (
+                          <option
+                            key={item.key}
+                            value={normalizeProgramLpkValue(item.title)}
+                          >
+                            {item.title}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
                 </div>
 
                 {/* 5. NO SERTIFIKAT BNSP */}
