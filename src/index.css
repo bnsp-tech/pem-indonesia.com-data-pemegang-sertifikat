@@ -10,3 +10,186 @@
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+/* Mobile-Only Overlay: tersembunyi di HP (< 768px) */
+.mobile-only-overlay {
+  display: none;
+}
+
+/* Tampil full-screen pada semua halaman saat layar >= 768px (PC / Laptop / Tablet lebar) */
+@media (min-width: 768px) {
+  html,
+  body {
+    overflow: hidden !important;
+    height: 100%;
+    background-color: #ffffff;
+  }
+
+  #root {
+    display: none !important;
+  }
+
+  .mobile-only-overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    width: 100vw;
+    height: 100dvh;
+    padding: clamp(16px, 3vh, 32px);
+    background: linear-gradient(155deg, #ffffff 0%, #fcfef8 55%, #f5fbe9 100%);
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .mobile-only-stage {
+    position: relative;
+    width: min(640px, 92vw);
+    height: min(640px, 92dvh);
+    background: #ffffff;
+    border: 1px solid #eef6df;
+    box-shadow: 0 22px 60px rgba(15, 76, 12, 0.14);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .mobile-only-blob {
+    position: absolute;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .mobile-only-blob--top-right {
+    top: -10px;
+    right: -10px;
+    width: clamp(170px, 34%, 250px);
+    height: auto;
+  }
+
+  .mobile-only-blob--bottom-left {
+    bottom: -12px;
+    left: -10px;
+    width: clamp(140px, 28%, 210px);
+    height: auto;
+  }
+
+  .mobile-only-ring {
+    position: absolute;
+    left: 7.5%;
+    top: 52%;
+    width: clamp(28px, 4.5vw, 40px);
+    height: clamp(28px, 4.5vw, 40px);
+    border-radius: 9999px;
+    border: 3px solid #0e5807;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .mobile-only-dots {
+    position: absolute;
+    right: 6.5%;
+    bottom: 10.5%;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: clamp(9px, 1.5vh, 14px) clamp(11px, 1.6vw, 16px);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .mobile-only-dots span {
+    width: 4px;
+    height: 4px;
+    border-radius: 9999px;
+    background-color: #64748b;
+    opacity: 0.75;
+  }
+
+  .mobile-only-content {
+    position: relative;
+    z-index: 3;
+    width: 100%;
+    height: 100%;
+    padding: clamp(22px, 4.5vh, 40px) clamp(24px, 4vw, 44px) clamp(18px, 3.5vh, 30px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    text-align: center;
+  }
+
+  .mobile-only-header {
+    width: 100%;
+  }
+
+  .mobile-only-title {
+    margin: 0;
+    color: #0b5b06;
+    font-weight: 900;
+    font-size: clamp(17px, 2.85vh, 25px);
+    line-height: 1.24;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+  }
+
+  .mobile-only-date {
+    margin: clamp(6px, 1vh, 10px) 0 0;
+    color: #093f05;
+    font-weight: 800;
+    font-style: italic;
+    font-size: clamp(11.5px, 1.8vh, 15px);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .mobile-only-visual-row {
+    position: relative;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(6px, 1.2vh, 14px) 0;
+  }
+
+  .mobile-only-illustration {
+    width: clamp(220px, 42vh, 330px);
+    max-width: 72%;
+    height: auto;
+    display: block;
+    margin-right: clamp(24px, 5vw, 56px);
+  }
+
+  .mobile-only-logo-wrap {
+    position: absolute;
+    right: clamp(4px, 2vw, 24px);
+    top: 44%;
+    transform: translateY(-50%);
+    width: clamp(90px, 16vh, 132px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mobile-only-apik-logo {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  .mobile-only-footer {
+    width: 100%;
+    padding-top: 4px;
+  }
+
+  .mobile-only-url {
+    color: #0b5b06;
+    font-weight: 800;
+    font-size: clamp(14px, 2.2vh, 19px);
+    letter-spacing: 0.01em;
+  }
+}
