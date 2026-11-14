@@ -112,7 +112,12 @@ function getSupabaseAdminClient(): SupabaseClient {
   const serviceRoleKey = getServiceRoleKey();
 
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new HttpError(500, SERVICE_KEY_ERROR_MSG);
+    throw new HttpError(
+      500,
+      `${SERVICE_KEY_ERROR_MSG} — Variabel environment ${
+        !supabaseUrl ? 'SUPABASE_URL' : 'SUPABASE_SERVICE_ROLE_KEY'
+      } kosong atau belum disetel di server.`
+    );
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
@@ -146,6 +151,71 @@ function isServiceKeyOrPermissionError(err: unknown): boolean {
   );
 }
 
+interface SupabaseLikeError {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+  status?: number;
+  statusCode?: number;
+}
+
+function formatSupabaseDetailedError(context: string, err: unknown): string {
+  if (!err || typeof err !== 'object') {
+    return `${context}: ${String(err || 'Unknown error')}`;
+  }
+  const e = err as SupabaseLikeError;
+  const parts: string[] = [];
+  if (e.code) parts.push(`code: ${e.code}`);
+  if (e.status ?? e.statusCode) parts.push(`status: ${e.status ?? e.statusCode}`);
+  const meta = parts.length > 0 ? ` [${parts.join(', ')}]` : '';
+  const msg = e.message || 'Unknown Supabase error';
+  const extra = [e.details ? `Detail: ${e.details}` : '', e.hint ? `Hint: ${e.hint}` : '']
+    .filter(Boolean)
+    .join(' | ');
+  const prefix = isServiceKeyOrPermissionError(err) ? `${SERVICE_KEY_ERROR_MSG} — ` : '';
+  return `${prefix}${context}${meta}: ${msg}${extra ? ` (${extra})` : ''}`;
+}
+
+export async function getData(supabaseAdmin: SupabaseClient): Promise<NormalizedPemegangRow[]> {
+  const PAGE_SIZE = 1000;
+  const allRows: RawPemegangRow[] = [];
+  let useOrderById = true;
+  let from = 0;
+
+  while (true) {
+    let query = supabaseAdmin.from('data_pemegang').select('*').range(from, from + PAGE_SIZE - 1);
+    if (useOrderById) {
+      query = query.order('id', { ascending: false });
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      // Fallback jika kolom id tidak tersedia atau gagal di-order
+      if (useOrderById && from === 0 && (error.code === '42703' || (error.message || '').toLowerCase().includes('order'))) {
+        useOrderById = false;
+        continue;
+      }
+
+      const status = isServiceKeyOrPermissionError(error) ? 403 : 500;
+      throw new HttpError(
+        status,
+        formatSupabaseDetailedError("Gagal membaca tabel 'data_pemegang' via supabaseAdmin", error)
+      );
+    }
+
+    const batch = (data as RawPemegangRow[] | null) ?? [];
+    allRows.push(...batch);
+    if (batch.length < PAGE_SIZE) {
+      break;
+    }
+    from += PAGE_SIZE;
+  }
+
+  return allRows.map(normalizeRow);
+}
+
 function normalizeRow(row: RawPemegangRow): NormalizedPemegangRow {
   const expiry = row.tanggal_berakhir ?? row.berlaku_sampai ?? null;
   const photo = row.foto_url ?? row.url_foto ?? null;
@@ -177,7 +247,10 @@ async function detectTableSchema(supabaseAdmin: SupabaseClient, forceRefresh = f
     const { error } = await supabaseAdmin.from('data_pemegang').select(col).limit(1);
     if (!error) return true;
     if (isServiceKeyOrPermissionError(error)) {
-      throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
+      throw new HttpError(
+        403,
+        formatSupabaseDetailedError(`Gagal mengecek kolom '${col}' di tabel 'data_pemegang'`, error)
+      );
     }
     return false;
   };
@@ -221,10 +294,8 @@ async function ensureFilesBucket(supabaseAdmin: SupabaseClient): Promise<void> {
   const { data: buckets, error: listError } = await supabaseAdmin.storage.listBuckets();
 
   if (listError) {
-    if (isServiceKeyOrPermissionError(listError)) {
-      throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-    }
-    throw new HttpError(500, `Gagal memeriksa bucket '${BUCKET_NAME}': ${listError.message}`);
+    const status = isServiceKeyOrPermissionError(listError) ? 403 : 500;
+    throw new HttpError(status, formatSupabaseDetailedError(`Gagal memeriksa bucket '${BUCKET_NAME}'`, listError));
   }
 
   const existing = (buckets ?? []).find(
@@ -241,17 +312,15 @@ async function ensureFilesBucket(supabaseAdmin: SupabaseClient): Promise<void> {
       if (msg.includes('already exists') || msg.includes('duplicate')) {
         return;
       }
-      if (isServiceKeyOrPermissionError(createError)) {
-        throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-      }
-      throw new HttpError(500, SERVICE_KEY_ERROR_MSG);
+      const status = isServiceKeyOrPermissionError(createError) ? 403 : 500;
+      throw new HttpError(status, formatSupabaseDetailedError(`Gagal membuat bucket '${BUCKET_NAME}'`, createError));
     }
   } else if (existing.public === false) {
     const { error: updateError } = await supabaseAdmin.storage.updateBucket(BUCKET_NAME, {
       public: true,
     });
     if (updateError && isServiceKeyOrPermissionError(updateError)) {
-      throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
+      throw new HttpError(403, formatSupabaseDetailedError(`Gagal mengubah bucket '${BUCKET_NAME}' menjadi public`, updateError));
     }
   }
 }
@@ -318,10 +387,8 @@ async function uploadToFilesBucket(
     });
 
   if (uploadError) {
-    if (isServiceKeyOrPermissionError(uploadError)) {
-      throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-    }
-    throw new HttpError(500, `Upload ke bucket '${BUCKET_NAME}' gagal: ${uploadError.message}`);
+    const status = isServiceKeyOrPermissionError(uploadError) ? 403 : 500;
+    throw new HttpError(status, formatSupabaseDetailedError(`Upload ke bucket '${BUCKET_NAME}' gagal`, uploadError));
   }
 
   const { data } = supabaseAdmin.storage.from(BUCKET_NAME).getPublicUrl(storagePath);
@@ -358,10 +425,8 @@ async function removeStorageFilesByUrls(
 
   const { error } = await supabaseAdmin.storage.from(BUCKET_NAME).remove(paths);
   if (error) {
-    if (isServiceKeyOrPermissionError(error)) {
-      throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-    }
-    throw new HttpError(500, `Gagal menghapus file di bucket '${BUCKET_NAME}': ${error.message}`);
+    const status = isServiceKeyOrPermissionError(error) ? 403 : 500;
+    throw new HttpError(status, formatSupabaseDetailedError(`Gagal menghapus file di bucket '${BUCKET_NAME}'`, error));
   }
 }
 
@@ -369,7 +434,9 @@ async function requireAdminAuth(req: Request, res: Response, next: NextFunction)
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   if (!token) {
-    res.status(401).json({ error: 'Gagal: Sesi admin tidak valid. Silakan login kembali.' });
+    res.status(401).json({
+      error: 'Gagal: Token sesi admin tidak ditemukan pada header Authorization. Silakan login kembali.',
+    });
     return;
   }
 
@@ -378,23 +445,29 @@ async function requireAdminAuth(req: Request, res: Response, next: NextFunction)
     const { data, error } = await authClient.auth.getUser(token);
     if (error || !data?.user) {
       if (error && isServiceKeyOrPermissionError(error) && getServiceRoleKey()) {
-        res.status(403).json({ error: SERVICE_KEY_ERROR_MSG });
+        res.status(403).json({
+          error: formatSupabaseDetailedError('Verifikasi sesi admin di server gagal', error),
+        });
         return;
       }
-      res.status(401).json({ error: 'Gagal: Sesi admin telah berakhir. Silakan login kembali.' });
+      res.status(401).json({
+        error: `Gagal: Sesi admin tidak valid atau telah berakhir (${error?.message || 'user tidak ditemukan'}). Silakan login kembali.`,
+      });
       return;
     }
 
     const email = (data.user.email || '').toLowerCase();
     if (email !== 'admin@lpk.local') {
-      res.status(403).json({ error: 'Gagal: Akun ini tidak memiliki akses Super Admin.' });
+      res.status(403).json({
+        error: `Gagal: Akun (${email || 'tanpa email'}) tidak memiliki akses Super Admin.`,
+      });
       return;
     }
 
     next();
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Gagal memverifikasi sesi admin.';
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: `Gagal: ${message}` });
   }
 }
 
@@ -474,10 +547,8 @@ async function checkDuplicateNikInProgram(
 
   const { data, error } = await query;
   if (error) {
-    if (isServiceKeyOrPermissionError(error)) {
-      throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-    }
-    throw new HttpError(500, `Gagal memvalidasi NIK: ${error.message}`);
+    const status = isServiceKeyOrPermissionError(error) ? 403 : 500;
+    throw new HttpError(status, formatSupabaseDetailedError('Gagal memvalidasi NIK di tabel data_pemegang', error));
   }
 
   if (data && data.length > 0) {
@@ -565,10 +636,8 @@ async function startServer() {
       });
 
       if (listErr) {
-        if (isServiceKeyOrPermissionError(listErr)) {
-          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-        }
-        throw new HttpError(500, `Gagal memeriksa user admin: ${listErr.message}`);
+        const status = isServiceKeyOrPermissionError(listErr) ? 403 : 500;
+        throw new HttpError(status, formatSupabaseDetailedError('Gagal memeriksa user admin di Supabase Auth', listErr));
       }
 
       const existingUser = (listData?.users ?? []).find(
@@ -584,10 +653,8 @@ async function startServer() {
         });
 
         if (createErr) {
-          if (isServiceKeyOrPermissionError(createErr)) {
-            throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-          }
-          throw new HttpError(500, `Gagal membuat user admin@lpk.local: ${createErr.message}`);
+          const status = isServiceKeyOrPermissionError(createErr) ? 403 : 500;
+          throw new HttpError(status, formatSupabaseDetailedError('Gagal membuat user admin@lpk.local', createErr));
         }
 
         res.status(201).json({ ok: true, created: true });
@@ -629,23 +696,14 @@ async function startServer() {
   app.get('/api/admin/pemegang', requireAdminAuth, async (_req: Request, res: Response) => {
     try {
       const supabaseAdmin = getSupabaseAdminClient();
-      const { data, error } = await supabaseAdmin
-        .from('data_pemegang')
-        .select('*')
-        .order('id', { ascending: false });
-
-      if (error) {
-        if (isServiceKeyOrPermissionError(error)) {
-          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-        }
-        throw new HttpError(500, `Gagal memuat data dari Supabase: ${error.message}`);
-      }
-
-      const rows = ((data as RawPemegangRow[] | null) ?? []).map(normalizeRow);
+      const rows = await getData(supabaseAdmin);
       res.json({ data: rows });
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
-      const message = err instanceof Error ? err.message : 'Gagal memuat data Supabase.';
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Gagal membaca tabel 'data_pemegang' via supabaseAdmin.";
       res.status(status).json({ error: message });
     }
   });
@@ -714,16 +772,14 @@ async function startServer() {
         if (uploadedPaths.length > 0) {
           await supabaseAdmin.storage.from(BUCKET_NAME).remove(uploadedPaths).catch(() => {});
         }
-        if (isServiceKeyOrPermissionError(insertError)) {
-          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-        }
         if (insertError.code === '23505') {
           throw new HttpError(
             409,
             `NIK ${validated.nik} sudah terdaftar pada program ${validated.program_lpk}.`
           );
         }
-        throw new HttpError(500, `Gagal menyimpan data ke Supabase: ${insertError.message}`);
+        const status = isServiceKeyOrPermissionError(insertError) ? 403 : 500;
+        throw new HttpError(status, formatSupabaseDetailedError("Gagal menyimpan data ke tabel 'data_pemegang'", insertError));
       }
 
       res.status(201).json({
@@ -760,9 +816,12 @@ async function startServer() {
 
       if (fetchError || !existingRaw) {
         if (fetchError && isServiceKeyOrPermissionError(fetchError)) {
-          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
+          throw new HttpError(403, formatSupabaseDetailedError("Gagal mengambil data di 'data_pemegang'", fetchError));
         }
-        throw new HttpError(404, 'Data pemegang tidak ditemukan.');
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          throw new HttpError(500, formatSupabaseDetailedError("Gagal mengambil data di 'data_pemegang'", fetchError));
+        }
+        throw new HttpError(404, `Data pemegang ID ${recordId} tidak ditemukan.`);
       }
 
       const existing = normalizeRow(existingRaw as RawPemegangRow);
@@ -838,16 +897,14 @@ async function startServer() {
         if (uploadedPaths.length > 0) {
           await supabaseAdmin.storage.from(BUCKET_NAME).remove(uploadedPaths).catch(() => {});
         }
-        if (isServiceKeyOrPermissionError(updateError)) {
-          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-        }
         if (updateError.code === '23505') {
           throw new HttpError(
             409,
             `NIK ${validated.nik} sudah terdaftar pada program ${validated.program_lpk}.`
           );
         }
-        throw new HttpError(500, `Gagal mengubah data di Supabase: ${updateError.message}`);
+        const status = isServiceKeyOrPermissionError(updateError) ? 403 : 500;
+        throw new HttpError(status, formatSupabaseDetailedError("Gagal mengubah data di 'data_pemegang'", updateError));
       }
 
       res.json({
@@ -878,9 +935,12 @@ async function startServer() {
 
       if (fetchError || !existingRaw) {
         if (fetchError && isServiceKeyOrPermissionError(fetchError)) {
-          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
+          throw new HttpError(403, formatSupabaseDetailedError("Gagal membaca data sebelum hapus di 'data_pemegang'", fetchError));
         }
-        throw new HttpError(404, 'Data pemegang tidak ditemukan.');
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          throw new HttpError(500, formatSupabaseDetailedError("Gagal membaca data sebelum hapus di 'data_pemegang'", fetchError));
+        }
+        throw new HttpError(404, `Data pemegang ID ${recordId} tidak ditemukan.`);
       }
 
       const existing = normalizeRow(existingRaw as RawPemegangRow);
@@ -897,10 +957,8 @@ async function startServer() {
         .eq('id', recordId);
 
       if (deleteError) {
-        if (isServiceKeyOrPermissionError(deleteError)) {
-          throw new HttpError(403, SERVICE_KEY_ERROR_MSG);
-        }
-        throw new HttpError(500, `Gagal menghapus data di Supabase: ${deleteError.message}`);
+        const status = isServiceKeyOrPermissionError(deleteError) ? 403 : 500;
+        throw new HttpError(status, formatSupabaseDetailedError("Gagal menghapus data di 'data_pemegang'", deleteError));
       }
 
       res.json({ message: 'Berhasil' });

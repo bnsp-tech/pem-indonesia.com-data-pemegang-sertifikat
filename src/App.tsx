@@ -466,7 +466,7 @@ interface HalamanSetelahNov2022Props {
   onBack?: () => void;
   onHome?: () => void;
   onVerifikasi?: (judul: string, jenisData?: string) => void;
-  onAdminLoginSuccess?: () => void;
+  onAdminLoginSuccess?: (accessToken: string) => void;
 }
 
 export function HalamanSetelahNov2022({
@@ -981,9 +981,9 @@ export function HalamanSetelahNov2022({
         {showLoginAdmin && (
           <LoginAdmin
             onClose={() => setShowLoginAdmin(false)}
-            onSuccess={() => {
+            onSuccess={(accessToken) => {
               setShowLoginAdmin(false);
-              onAdminLoginSuccess?.();
+              onAdminLoginSuccess?.(accessToken);
             }}
           />
         )}
@@ -1717,7 +1717,7 @@ export function HalamanVerifikasi({
 
 interface LoginAdminProps {
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (accessToken: string) => void;
 }
 
 export function LoginAdmin({ onClose, onSuccess }: LoginAdminProps) {
@@ -1760,7 +1760,7 @@ export function LoginAdmin({ onClose, onSuccess }: LoginAdminProps) {
         };
 
         if (!ensureRes.ok) {
-          setError(ensureJson.error || 'Gagal: Username atau password tidak valid.');
+          setError(ensureJson.error || `Gagal (HTTP ${ensureRes.status}): Username atau password tidak valid.`);
           return;
         }
 
@@ -1772,14 +1772,17 @@ export function LoginAdmin({ onClose, onSuccess }: LoginAdminProps) {
         authError = retry.error;
       }
 
-      if (authError || !authData.session) {
-        setError('Gagal: Username atau password tidak valid.');
+      if (authError || !authData.session?.access_token) {
+        setError(
+          `Gagal: ${authError?.message || 'Username atau password tidak valid.'}`
+        );
         return;
       }
 
-      onSuccess();
-    } catch {
-      setError('Gagal: Tidak dapat terhubung ke layanan autentikasi Supabase.');
+      onSuccess(authData.session.access_token);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Network error';
+      setError(`Gagal: Tidak dapat terhubung ke layanan autentikasi Supabase (${detail}).`);
     } finally {
       setSubmitting(false);
     }
@@ -1963,11 +1966,16 @@ function normalizeProgramLpkValue(programTitle: string): string {
 }
 
 interface HalamanAdminDashboardProps {
+  accessToken?: string | null;
   onKembali: () => void;
   onLogout: () => void;
 }
 
-export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashboardProps) {
+export function HalamanAdminDashboard({
+  accessToken,
+  onKembali,
+  onLogout,
+}: HalamanAdminDashboardProps) {
   const [records, setRecords] = useState<PemegangSertifikatRow[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -2004,25 +2012,39 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
   const [formEKartuMeta, setFormEKartuMeta] = useState<{ name: string; type: string } | null>(null);
 
   const getAuthHeaders = useCallback(async (): Promise<Record<string, string>> => {
-    const { data } = await supabaseClient.auth.getSession();
-    const token = data.session?.access_token || '';
+    let token = accessToken || '';
+    if (!token) {
+      const { data } = await supabaseClient.auth.getSession();
+      token = data.session?.access_token || '';
+    }
     return {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     };
-  }, []);
+  }, [accessToken]);
 
-  const handleUnauthorized = useCallback(async () => {
-    await supabaseClient.auth.signOut().catch(() => {});
-    onLogout();
-  }, [onLogout]);
+  const parseErrorResponse = async (res: Response, fallbackContext: string): Promise<string> => {
+    const rawText = await res.text().catch(() => '');
+    let parsedError = '';
+    if (rawText) {
+      try {
+        const json = JSON.parse(rawText) as { error?: string; message?: string };
+        parsedError = json.error || json.message || '';
+      } catch {
+        parsedError = rawText.slice(0, 240).replace(/\s+/g, ' ').trim();
+      }
+    }
+    const detail = parsedError || res.statusText || 'Tidak ada keterangan error dari server';
+    return `Gagal [HTTP ${res.status}] (${fallbackContext}): ${detail}`;
+  };
 
   const checkStorageStatus = useCallback(async () => {
     try {
       const headers = await getAuthHeaders();
       const res = await fetch('/api/admin/status', { headers });
-      if (res.status === 401) {
-        await handleUnauthorized();
+      if (!res.ok) {
+        const errMsg = await parseErrorResponse(res, 'cek status storage');
+        setStorageWarning(errMsg);
         return;
       }
       const json = (await res.json().catch(() => ({}))) as {
@@ -2034,10 +2056,11 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
       } else {
         setStorageWarning(null);
       }
-    } catch {
-      setStorageWarning('Gagal: Tidak dapat memeriksa status server Supabase Admin.');
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Network error';
+      setStorageWarning(`Gagal: Tidak dapat memeriksa status server Supabase Admin (${detail}).`);
     }
-  }, [getAuthHeaders, handleUnauthorized]);
+  }, [getAuthHeaders]);
 
   const fetchAllRecords = useCallback(async () => {
     setLoadingData(true);
@@ -2048,28 +2071,34 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         headers,
       });
 
-      if (res.status === 401) {
-        await handleUnauthorized();
-        return;
+      if (!res.ok) {
+        const detailedError = await parseErrorResponse(res, 'GET /api/admin/pemegang');
+        throw new Error(detailedError);
       }
 
-      const json = (await res.json().catch(() => ({}))) as {
+      const json = (await res.json().catch(() => null)) as {
         data?: PemegangSertifikatRow[];
         error?: string;
-      };
+      } | null;
 
-      if (!res.ok) {
-        throw new Error(json.error || 'Gagal memuat data dari Supabase.');
+      if (!json || !Array.isArray(json.data)) {
+        throw new Error(
+          json?.error ||
+            'Gagal [Invalid JSON]: Server tidak mengembalikan array data_pemegang yang valid.'
+        );
       }
 
-      setRecords(json.data ?? []);
+      setRecords(json.data);
     } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : 'Gagal memuat data dari Supabase.';
+      const rawMsg =
+        err instanceof Error
+          ? err.message
+          : "Gagal membaca tabel 'data_pemegang' via server supabaseAdmin.";
       setAdminError(rawMsg.startsWith('Gagal') ? rawMsg : `Gagal: ${rawMsg}`);
     } finally {
       setLoadingData(false);
     }
-  }, [getAuthHeaders, handleUnauthorized]);
+  }, [getAuthHeaders]);
 
   useEffect(() => {
     void checkStorageStatus();
@@ -2328,9 +2357,9 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         body: JSON.stringify(requestBody),
       });
 
-      if (res.status === 401) {
-        await handleUnauthorized();
-        return;
+      if (!res.ok) {
+        const detailedError = await parseErrorResponse(res, `${method} ${endpoint}`);
+        throw new Error(detailedError);
       }
 
       const json = (await res.json().catch(() => ({}))) as {
@@ -2339,8 +2368,10 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         error?: string;
       };
 
-      if (!res.ok || !json.data) {
-        throw new Error(json.error || 'Gagal menyimpan data ke Supabase.');
+      if (!json.data) {
+        throw new Error(
+          json.error || `Gagal [Invalid JSON]: Server tidak mengembalikan data tersimpan (${method} ${endpoint}).`
+        );
       }
 
       const savedRow = json.data;
@@ -2373,18 +2404,9 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
         headers,
       });
 
-      if (res.status === 401) {
-        await handleUnauthorized();
-        return;
-      }
-
-      const json = (await res.json().catch(() => ({}))) as {
-        message?: string;
-        error?: string;
-      };
-
       if (!res.ok) {
-        throw new Error(json.error || 'Gagal menghapus data di Supabase.');
+        const detailedError = await parseErrorResponse(res, `DELETE /api/admin/pemegang/${id}`);
+        throw new Error(detailedError);
       }
 
       setRecords((prev) => prev.filter((row) => row.id !== id));
@@ -2621,8 +2643,26 @@ export function HalamanAdminDashboard({ onKembali, onLogout }: HalamanAdminDashb
           )}
 
           {adminError && (
-            <div className="rounded-[12px] bg-rose-950/75 border border-rose-700/70 px-3.5 py-2.5 text-[12px] text-rose-200">
-              {adminError}
+            <div
+              role="alert"
+              className="rounded-[12px] bg-rose-950/85 border border-rose-600/80 px-3.5 py-3 text-[12px] text-rose-100 space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10.5px] font-extrabold uppercase tracking-[0.06em] text-rose-300">
+                  ERROR OPERASI SUPABASE ADMIN
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void fetchAllRecords()}
+                  disabled={loadingData}
+                  className="rounded-md bg-rose-600/80 hover:bg-rose-600 px-2.5 py-1 text-[10px] font-extrabold uppercase text-white cursor-pointer disabled:opacity-50"
+                >
+                  {loadingData ? 'MEMUAT...' : 'COBA LAGI'}
+                </button>
+              </div>
+              <p className="whitespace-pre-wrap break-words leading-relaxed text-rose-200">
+                {adminError}
+              </p>
             </div>
           )}
 
@@ -3124,6 +3164,7 @@ export default function App() {
     initialQuery.jenis || undefined
   );
   const [initialNikVerifikasi] = useState(initialQuery.nik);
+  const [adminAccessToken, setAdminAccessToken] = useState<string | null>(null);
 
   if (page === 'sebelum') {
     return (
@@ -3144,7 +3185,10 @@ export default function App() {
           setJenisDataVerifikasi(jenisData);
           setPage('verifikasi');
         }}
-        onAdminLoginSuccess={() => setPage('admin')}
+        onAdminLoginSuccess={(token) => {
+          setAdminAccessToken(token);
+          setPage('admin');
+        }}
       />
     );
   }
@@ -3163,8 +3207,12 @@ export default function App() {
   if (page === 'admin') {
     return (
       <HalamanAdminDashboard
+        accessToken={adminAccessToken}
         onKembali={() => setPage('sesudah')}
-        onLogout={() => setPage('sesudah')}
+        onLogout={() => {
+          setAdminAccessToken(null);
+          setPage('sesudah');
+        }}
       />
     );
   }
